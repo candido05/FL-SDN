@@ -14,9 +14,13 @@ from config import (
     NUM_ROUNDS, LOCAL_EPOCHS,
     LOCAL_EPOCHS_BY_CAT, CLIENT_CATEGORIES,
     SDN_ADAPTIVE_EPOCHS,
+    HEALTH_SCORE_ENABLED, HEALTH_SCORE_PROFILE,
+    HEALTH_SCORE_CUSTOM_WEIGHTS, HEALTH_SCORE_MAX_EXCLUDE,
+    HEALTH_SCORE_MIN_ROUNDS, HEALTH_SCORE_THRESHOLD,
 )
 from core.serialization import deserialize_model
 from core.csv_logger import CSVLogger, SDNMetricsLogger
+from core.health_score import ClientHealthTracker, compute_leave_one_out
 from sdn.network import get_network_metrics, filter_eligible_clients, adapt_local_epochs
 from sdn.qos import apply_qos_policy, remove_qos_policies
 from strategies.base import BaseStrategy
@@ -39,6 +43,20 @@ class SDNBagging(BaseStrategy):
         self.client_models: Dict[int, object] = {}
         self.best_model = None
         self._sdn_logger = None
+
+        # Health Score tracker
+        if HEALTH_SCORE_ENABLED:
+            self._health_tracker = ClientHealthTracker(
+                profile=HEALTH_SCORE_PROFILE,
+                custom_weights=HEALTH_SCORE_CUSTOM_WEIGHTS,
+                max_exclude=HEALTH_SCORE_MAX_EXCLUDE,
+                min_rounds_before_exclude=HEALTH_SCORE_MIN_ROUNDS,
+                exclude_threshold=HEALTH_SCORE_THRESHOLD,
+            )
+            print(f"  [Health Score] Perfil: {HEALTH_SCORE_PROFILE} | "
+                  f"Pesos: {self._health_tracker.weights}")
+        else:
+            self._health_tracker = None
 
     def _on_logger_set(self, logger: CSVLogger) -> None:
         """Cria SDNMetricsLogger usando run_dir do CSVLogger."""
@@ -92,11 +110,24 @@ class SDNBagging(BaseStrategy):
             print(f"  [SDN] AVISO: Nenhum cliente elegivel! Usando todos.")
             eligible = {cid: 0.5 for cid in all_client_ids}
 
-        # 3. Seleciona os melhores
+        # 3. Exclui clientes via Health Score (se habilitado)
+        excluded_ids = []
+        if self._health_tracker:
+            excluded_ids = self._health_tracker.get_excluded_clients(
+                list(eligible.keys()),
+            )
+            if excluded_ids:
+                print(f"  [Health Score] Excluindo clientes: {excluded_ids}")
+                for cid in excluded_ids:
+                    eligible.pop(cid, None)
+
+        # 4. Seleciona os melhores dentre os elegiveis restantes
         sorted_clients = sorted(eligible.items(), key=lambda x: x[1], reverse=True)
         selected_ids = [cid for cid, _ in sorted_clients]
 
         print(f"\n  [SDN] Clientes selecionados: {selected_ids}")
+        if excluded_ids:
+            print(f"  [SDN] Clientes excluidos por Health Score: {excluded_ids}")
         print(f"  [SDN] Warm start: {has_model}")
 
         # 4. Aplica QoS
@@ -195,6 +226,48 @@ class SDNBagging(BaseStrategy):
         remove_qos_policies(list(self.client_models.keys()))
 
         self._aggregate_resource_metrics(results)
+
+        # Health Score: atualiza tracker com resultados do round
+        if self._health_tracker and self.client_models:
+            # Coleta metricas por cliente a partir dos FitRes
+            client_results = {}
+            for _, fit_res in results:
+                cid = int(fit_res.metrics.get("client_id", 0))
+                client_results[cid] = {
+                    "accuracy": fit_res.metrics.get("accuracy", 0),
+                    "f1": fit_res.metrics.get("f1", 0),
+                    "training_time": fit_res.metrics.get("training_time", 0),
+                    "cpu_percent": fit_res.metrics.get("cpu_percent", 0),
+                    "ram_mb": fit_res.metrics.get("ram_mb", 0),
+                    "model_size_kb": fit_res.metrics.get("model_size_kb", 0),
+                }
+
+            # Leave-one-out para medir contribuicao de cada cliente
+            ensemble_acc, contributions = compute_leave_one_out(
+                self.client_models, self.X_test, self.y_test,
+            )
+
+            # Recupera metricas de rede do configure_fit
+            net_metrics = get_network_metrics(list(client_results.keys()))
+            net_scores = filter_eligible_clients(net_metrics)
+
+            scores = self._health_tracker.update_round(
+                server_round, client_results, net_metrics, net_scores,
+                ensemble_acc, contributions,
+            )
+
+            # Log dos scores
+            print(f"\n  [Health Score] Round {server_round} — Perfil: {self._health_tracker.profile_name}")
+            for cid, info in sorted(scores.items()):
+                status = "EXCLUIDO" if info["excluded"] else "OK"
+                print(f"    Cliente {cid}: health={info['health_score']:.4f} "
+                      f"(C={info['contribution_score']:.2f} "
+                      f"R={info['resource_score']:.2f} "
+                      f"N={info['network_score']:.2f}) [{status}]")
+
+            # Log health score no SDNMetricsLogger
+            if self._sdn_logger:
+                self._sdn_logger.log_health_scores(server_round, scores)
 
         sys.stdout.flush()
         return None, {"num_models": len(self.client_models)}

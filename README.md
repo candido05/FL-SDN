@@ -1,6 +1,6 @@
 # FL-SDN
 
-Pesquisa de TCC que investiga o **impacto de redes SDN (Software-Defined Networking) no tempo de convergencia de Federated Learning (FL)** em cenarios com congestionamento de rede.
+Projeto do laboratorio LUMO-UFPB para artigo cientifico que investiga o **impacto de redes SDN (Software-Defined Networking) no tempo de convergencia de Federated Learning (FL)** em cenarios com congestionamento de rede.
 
 Usa o dataset **Higgs** (classificacao binaria de particulas) com modelos gradient boosting (**XGBoost**, **LightGBM**, **CatBoost**) orquestrados pelo framework **Flower** (flwr).
 

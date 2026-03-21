@@ -115,6 +115,41 @@ SDN_SCORE_WEIGHTS = {
 # False = usa epocas fixas por categoria (comportamento original)
 SDN_ADAPTIVE_EPOCHS = True
 
+# ---------------------------------------------------------------------------
+# Client Health Score — selecao/exclusao dinamica de clientes
+# ---------------------------------------------------------------------------
+
+# Perfil de pesos para o health score.
+# Opcoes: "balanced", "contribution", "resource", "network", "custom"
+#   - balanced:     contribuicao=0.40, recurso=0.30, rede=0.30
+#   - contribution: contribuicao=0.70, recurso=0.15, rede=0.15
+#   - resource:     contribuicao=0.15, recurso=0.70, rede=0.15
+#   - network:      contribuicao=0.15, recurso=0.15, rede=0.70
+#   - custom:       usa HEALTH_SCORE_CUSTOM_WEIGHTS abaixo
+HEALTH_SCORE_PROFILE = "balanced"
+
+# Pesos customizados (so usados quando HEALTH_SCORE_PROFILE = "custom")
+# Devem somar 1.0
+HEALTH_SCORE_CUSTOM_WEIGHTS = {
+    "contribution": 0.40,
+    "resource": 0.30,
+    "network": 0.30,
+}
+
+# Maximo de clientes excluidos por round
+HEALTH_SCORE_MAX_EXCLUDE = 2
+
+# Rounds minimos antes de comecar a excluir (para acumular historico)
+HEALTH_SCORE_MIN_ROUNDS = 2
+
+# Clientes com score abaixo deste limiar sao candidatos a exclusao
+HEALTH_SCORE_THRESHOLD = 0.30
+
+# Habilitar/desabilitar o sistema de health score
+# True = ativa exclusao dinamica nas estrategias SDN
+# False = comportamento original (sem exclusao)
+HEALTH_SCORE_ENABLED = True
+
 # Mapeamento client_id → IP na rede GNS3
 SDN_CLIENT_IPS = {
     0: "172.16.1.12",

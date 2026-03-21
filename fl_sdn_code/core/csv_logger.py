@@ -124,8 +124,11 @@ class SDNMetricsLogger:
 
     def __init__(self, run_dir: str, exp_name: str = None):
         self._exp_name = exp_name or os.environ.get("EXP", "experimento")
+        self._run_dir = run_dir
         self._log_file = os.path.join(run_dir, f"{self._exp_name}_sdn_metricas.csv")
+        self._health_file = os.path.join(run_dir, f"{self._exp_name}_health_scores.csv")
         self._rows: List[Dict] = []
+        self._health_rows: List[Dict] = []
 
     @property
     def log_file(self) -> str:
@@ -163,3 +166,33 @@ class SDNMetricsLogger:
                 )
                 writer.writeheader()
                 writer.writerows(self._rows)
+
+    _HEALTH_FIELDS = [
+        "round", "client_id", "health_score",
+        "contribution_score", "resource_score", "network_score",
+        "excluded",
+    ]
+
+    def log_health_scores(
+        self,
+        server_round: int,
+        scores: Dict[int, Dict],
+    ) -> None:
+        """Registra health scores por cliente por round."""
+        for cid, info in sorted(scores.items()):
+            row = {
+                "round": server_round,
+                "client_id": cid,
+                "health_score": round(info.get("health_score", 0), 4),
+                "contribution_score": round(info.get("contribution_score", 0), 4),
+                "resource_score": round(info.get("resource_score", 0), 4),
+                "network_score": round(info.get("network_score", 0), 4),
+                "excluded": info.get("excluded", False),
+            }
+            self._health_rows.append(row)
+
+        if self._health_rows:
+            with open(self._health_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=self._HEALTH_FIELDS)
+                writer.writeheader()
+                writer.writerows(self._health_rows)
