@@ -17,8 +17,6 @@ RUN pip3 install --no-cache-dir \
     "scikit-learn>=1.3.0" \
     "numpy>=1.24.0"
 
-CMD ["/bin/bash"]
-
 # Desabilita IPv6 e comportamento agressivo de ARP no boot
 RUN echo "net.ipv6.conf.all.disable_ipv6=1" >> /etc/sysctl.conf && \
     echo "net.ipv6.conf.default.disable_ipv6=1" >> /etc/sysctl.conf && \

@@ -83,3 +83,44 @@ CATBOOST_PARAMS = {
     "random_seed": RANDOM_SEED,
     "verbose": False,
 }
+
+# ---------------------------------------------------------------------------
+# Integracao SDN (OpenDaylight)
+# ---------------------------------------------------------------------------
+
+# Conexao com o controlador SDN
+SDN_CONTROLLER_IP   = "172.16.1.1"   # IP do OpenDaylight
+SDN_CONTROLLER_PORT = 8181            # Porta REST do ODL
+SDN_CONTROLLER_USER = "admin"         # Usuario ODL
+SDN_CONTROLLER_PASS = "admin"         # Senha ODL
+
+# Modo mock: True = gera metricas simuladas (sem ODL real)
+# Util para testes locais e validacao da logica
+SDN_MOCK_MODE = True
+
+# Limiares de elegibilidade de clientes
+SDN_MIN_BANDWIDTH_MBPS = 10.0   # Largura de banda minima para participar
+SDN_MAX_LATENCY_MS     = 50.0   # Latencia maxima aceita
+SDN_MAX_PACKET_LOSS    = 0.10   # Perda de pacotes maxima (10%)
+
+# Pesos para calculo do efficiency_score (devem somar 1.0)
+SDN_SCORE_WEIGHTS = {
+    "bandwidth":   0.5,   # Peso da largura de banda
+    "latency":     0.3,   # Peso da latencia
+    "packet_loss": 0.2,   # Peso da perda de pacotes
+}
+
+# Adaptacao de epocas locais baseada em rede
+# True = ajusta epocas conforme efficiency_score do cliente
+# False = usa epocas fixas por categoria (comportamento original)
+SDN_ADAPTIVE_EPOCHS = True
+
+# Mapeamento client_id → IP na rede GNS3
+SDN_CLIENT_IPS = {
+    0: "172.16.1.12",
+    1: "172.16.1.12",
+    2: "172.16.1.13",
+    3: "172.16.1.13",
+    4: "172.16.1.14",
+    5: "172.16.1.14",
+}

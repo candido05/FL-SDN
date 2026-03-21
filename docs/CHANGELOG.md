@@ -4,6 +4,38 @@ Registro de modificacoes do projeto. Cada entrada documenta o que mudou, por que
 
 ---
 
+## [2026-03-21] Integracao SDN — Eficiencia de Recursos
+
+### Adicionado
+- `fl_simple_demo/sdn_utils.py` — Modulo de integracao com OpenDaylight:
+  - `get_network_metrics_from_sdn()`: consulta largura de banda, latencia, jitter e perda de pacotes
+  - `filter_eligible_clients()`: filtra clientes por limiares de rede
+  - `calculate_efficiency_score()`: calcula score ponderado de eficiencia
+  - `apply_qos_policy_via_sdn()`: aplica priorizacao de trafego via flows OpenFlow (DSCP)
+  - `remove_qos_policies()`: remove flows de QoS apos agregacao
+  - `adapt_local_epochs()`: ajusta epocas locais conforme condicao de rede
+  - Modo mock para testes sem ODL real (SDN_MOCK_MODE=True)
+- `fl_simple_demo/sdn_strategy.py` — Estrategias FL SDN-aware:
+  - `SDNBagging`: Bagging com selecao de clientes por efficiency_score + QoS + epocas adaptativas
+  - `SDNCycling`: Cycling inteligente (seleciona proximo por rede, nao round-robin fixo)
+  - CSV separado `<EXP>_sdn_metricas.csv` com metricas de rede por cliente por round
+
+### Modificado
+- `fl_simple_demo/config.py`:
+  - Adicionada secao completa de parametros SDN (IP ODL, limiares, pesos, IPs dos clientes)
+  - `SDN_MOCK_MODE`, `SDN_ADAPTIVE_EPOCHS`, `SDN_SCORE_WEIGHTS`, `SDN_CLIENT_IPS`
+- `fl_simple_demo/server.py`:
+  - Suporta `--strategy sdn-bagging` e `--strategy sdn-cycling`
+  - Injeta funcao de logging no modulo sdn_strategy
+- `fl_simple_demo/client.py`:
+  - Aceita `adapted_epochs` e `efficiency_score` via config do FitIns
+  - Usa epocas adaptativas quando enviadas pelo servidor SDN
+  - Log indica quando epocas foram adaptadas pelo SDN
+- `fl_simple_demo/run_all.py`:
+  - Suporta `--strategy sdn-bagging` e `--strategy sdn-cycling`
+
+---
+
 ## [2026-03-21] Analise inicial e documentacao
 
 ### Adicionado

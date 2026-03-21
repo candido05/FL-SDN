@@ -5,6 +5,8 @@ Uso:
     python run_all.py --model xgboost --strategy bagging
     python run_all.py --model lightgbm --strategy cycling
     python run_all.py --model catboost --strategy bagging
+    python run_all.py --model xgboost --strategy sdn-bagging
+    python run_all.py --model xgboost --strategy sdn-cycling
 """
 
 import argparse
@@ -20,7 +22,7 @@ def main():
     parser.add_argument("--model", type=str, required=True,
                         choices=["xgboost", "lightgbm", "catboost"])
     parser.add_argument("--strategy", type=str, required=True,
-                        choices=["bagging", "cycling"])
+                        choices=["bagging", "cycling", "sdn-bagging", "sdn-cycling"])
     args = parser.parse_args()
 
     print(f"{'='*60}")

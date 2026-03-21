@@ -31,6 +31,8 @@ from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score,
+    log_loss, matthews_corrcoef, balanced_accuracy_score, cohen_kappa_score,
+    brier_score_loss, average_precision_score, confusion_matrix,
 )
 
 import xgboost as xgb
@@ -224,11 +226,24 @@ class SimpleClient(fl.client.Client):
         server_round = int(config.get("server_round",  0))
         use_warm     = bool(config.get("warm_start",   False))
 
+        # Epocas adaptativas: o servidor SDN pode enviar um valor ajustado
+        # Se nao receber, usa o valor da categoria (comportamento original)
+        adapted_epochs = int(config.get("adapted_epochs", 0))
+        if adapted_epochs > 0:
+            round_epochs = adapted_epochs
+        else:
+            round_epochs = self.local_epochs
+
+        eff_score = float(config.get("efficiency_score", 0))
+
         print(f"\n{'─'*60}")
         print(f"  [Cliente {self.client_id}] INICIO Round {server_round}")
         print(f"  [Cliente {self.client_id}] Modelo: {self.model_type} | "
               f"Categoria: {self.category} | "
-              f"Epocas locais: {self.local_epochs} | Warm start: {use_warm}")
+              f"Epocas locais: {round_epochs} | Warm start: {use_warm}")
+        if adapted_epochs > 0 and adapted_epochs != self.local_epochs:
+            print(f"  [Cliente {self.client_id}] Epocas adaptadas pelo SDN: "
+                  f"{self.local_epochs} → {round_epochs} (score={eff_score:.4f})")
         print(f"  [Cliente {self.client_id}] Amostras treino: {len(self.X_train)}")
         print(f"{'─'*60}")
         sys.stdout.flush()
@@ -246,7 +261,7 @@ class SimpleClient(fl.client.Client):
         self.model = train_model(
             self.model_type, self.X_train, self.y_train,
             self.client_id, server_round,
-            self.local_epochs,   # ← passa épocas por categoria
+            round_epochs,   # ← usa epocas adaptativas se disponivel
             warm_model,
         )
         elapsed = time.time() - t0
@@ -254,11 +269,21 @@ class SimpleClient(fl.client.Client):
         y_prob = self.model.predict_proba(self.X_test)[:, 1]
         y_pred = (y_prob >= 0.5).astype(int)
 
-        acc  = accuracy_score(self.y_test, y_pred)
-        prec = precision_score(self.y_test, y_pred, zero_division=0)
-        rec  = recall_score(self.y_test, y_pred, zero_division=0)
-        f1   = f1_score(self.y_test, y_pred, zero_division=0)
-        auc  = roc_auc_score(self.y_test, y_prob)
+        acc    = accuracy_score(self.y_test, y_pred)
+        prec   = precision_score(self.y_test, y_pred, zero_division=0)
+        rec    = recall_score(self.y_test, y_pred, zero_division=0)
+        f1     = f1_score(self.y_test, y_pred, zero_division=0)
+        auc    = roc_auc_score(self.y_test, y_prob)
+        loglss = log_loss(self.y_test, y_prob)
+        mcc    = matthews_corrcoef(self.y_test, y_pred)
+        bal_ac = balanced_accuracy_score(self.y_test, y_pred)
+        kappa  = cohen_kappa_score(self.y_test, y_pred)
+        brier  = brier_score_loss(self.y_test, y_prob)
+        pr_auc = average_precision_score(self.y_test, y_prob)
+
+        # Specificity (TNR) via confusion matrix
+        tn, fp, fn, tp = confusion_matrix(self.y_test, y_pred).ravel()
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
 
         model_bytes    = pickle.dumps(self.model)
         model_size_kb  = len(model_bytes) / 1024
@@ -266,11 +291,19 @@ class SimpleClient(fl.client.Client):
         print(f"\n  [Cliente {self.client_id}] FIM Round {server_round} | Tempo: {elapsed:.1f}s")
         print(f"  [Cliente {self.client_id}] Tamanho modelo: {model_size_kb:.1f} KB")
         print(f"  [Cliente {self.client_id}] Metricas no teste:")
-        print(f"    Accuracy  = {acc:.4f}")
-        print(f"    Precision = {prec:.4f}")
-        print(f"    Recall    = {rec:.4f}")
-        print(f"    F1-Score  = {f1:.4f}")
-        print(f"    AUC-ROC   = {auc:.4f}")
+        print(f"    Accuracy      = {acc:.4f}")
+        print(f"    Bal. Accuracy = {bal_ac:.4f}")
+        print(f"    Precision     = {prec:.4f}")
+        print(f"    Recall (TPR)  = {rec:.4f}")
+        print(f"    Specificity   = {spec:.4f}")
+        print(f"    F1-Score      = {f1:.4f}")
+        print(f"    AUC-ROC       = {auc:.4f}")
+        print(f"    PR-AUC (AP)   = {pr_auc:.4f}")
+        print(f"    Log Loss      = {loglss:.4f}")
+        print(f"    Brier Score   = {brier:.4f}")
+        print(f"    MCC           = {mcc:.4f}")
+        print(f"    Cohen Kappa   = {kappa:.4f}")
+        print(f"    TP={tp} FP={fp} TN={tn} FN={fn}")
         sys.stdout.flush()
 
         return FitRes(
@@ -278,16 +311,23 @@ class SimpleClient(fl.client.Client):
             parameters=Parameters(tensors=[model_bytes], tensor_type="pickle"),
             num_examples=len(self.X_train),
             metrics={
-                "client_id":     self.client_id,
-                "category":      self.category,
-                "local_epochs":  self.local_epochs,
-                "accuracy":      float(acc),
-                "precision":     float(prec),
-                "recall":        float(rec),
-                "f1":            float(f1),
-                "auc":           float(auc),
-                "training_time": float(elapsed),
-                "model_size_kb": float(model_size_kb),
+                "client_id":          self.client_id,
+                "category":           self.category,
+                "local_epochs":       round_epochs,
+                "accuracy":           float(acc),
+                "balanced_accuracy":  float(bal_ac),
+                "precision":          float(prec),
+                "recall":             float(rec),
+                "specificity":        float(spec),
+                "f1":                 float(f1),
+                "auc":                float(auc),
+                "pr_auc":             float(pr_auc),
+                "log_loss":           float(loglss),
+                "brier_score":        float(brier),
+                "mcc":                float(mcc),
+                "cohen_kappa":        float(kappa),
+                "training_time":      float(elapsed),
+                "model_size_kb":      float(model_size_kb),
             },
         )
 

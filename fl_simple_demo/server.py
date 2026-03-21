@@ -26,6 +26,8 @@ from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score,
+    log_loss, matthews_corrcoef, balanced_accuracy_score, cohen_kappa_score,
+    brier_score_loss, average_precision_score, confusion_matrix,
 )
 
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -72,26 +74,28 @@ _t_start: float = 0.0
 _log_rows: List[Dict] = []
 
 
+_CSV_FIELDS = [
+    "round", "elapsed_sec",
+    "accuracy", "balanced_accuracy", "precision", "recall", "specificity",
+    "f1", "auc", "pr_auc", "log_loss", "brier_score", "mcc", "cohen_kappa",
+]
+
+
 def _log_round(server_round: int, metrics: Dict) -> None:
     """Registra métricas do round atual no CSV e imprime no terminal."""
     elapsed = round(time.time() - _t_start, 2)
-    row = {
-        "round":       server_round,
-        "elapsed_sec": elapsed,
-        "accuracy":    round(metrics.get("accuracy",  0.0), 4),
-        "f1":          round(metrics.get("f1",        0.0), 4),
-        "auc":         round(metrics.get("auc",       0.0), 4),
-        "precision":   round(metrics.get("precision", 0.0), 4),
-        "recall":      round(metrics.get("recall",    0.0), 4),
-    }
+    row = {"round": server_round, "elapsed_sec": elapsed}
+    for field in _CSV_FIELDS[2:]:
+        row[field] = round(metrics.get(field, 0.0), 4)
     _log_rows.append(row)
 
     print(f"  [LOG] Round {server_round:2d} | {elapsed:7.1f}s | "
-          f"acc={row['accuracy']:.4f} | f1={row['f1']:.4f} | auc={row['auc']:.4f}")
+          f"acc={row['accuracy']:.4f} | f1={row['f1']:.4f} | auc={row['auc']:.4f} | "
+          f"mcc={row['mcc']:.4f} | kappa={row['cohen_kappa']:.4f}")
     sys.stdout.flush()
 
     with open(_LOG_FILE, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
         writer.writeheader()
         writer.writerows(_log_rows)
 
@@ -130,21 +134,42 @@ def deserialize_model(raw_bytes: bytes):
 
 
 def print_metrics(prefix: str, y_true, y_pred, y_prob):
-    acc  = accuracy_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    rec  = recall_score(y_true, y_pred, zero_division=0)
-    f1   = f1_score(y_true, y_pred, zero_division=0)
-    auc  = roc_auc_score(y_true, y_prob)
+    acc    = accuracy_score(y_true, y_pred)
+    prec   = precision_score(y_true, y_pred, zero_division=0)
+    rec    = recall_score(y_true, y_pred, zero_division=0)
+    f1     = f1_score(y_true, y_pred, zero_division=0)
+    auc    = roc_auc_score(y_true, y_prob)
+    loglss = log_loss(y_true, y_prob)
+    mcc    = matthews_corrcoef(y_true, y_pred)
+    bal_ac = balanced_accuracy_score(y_true, y_pred)
+    kappa  = cohen_kappa_score(y_true, y_pred)
+    brier  = brier_score_loss(y_true, y_prob)
+    pr_auc = average_precision_score(y_true, y_prob)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    spec   = tn / (tn + fp) if (tn + fp) > 0 else 0.0
 
     print(f"  {prefix}")
-    print(f"    Accuracy  = {acc:.4f}")
-    print(f"    Precision = {prec:.4f}")
-    print(f"    Recall    = {rec:.4f}")
-    print(f"    F1-Score  = {f1:.4f}")
-    print(f"    AUC-ROC   = {auc:.4f}")
+    print(f"    Accuracy          = {acc:.4f}")
+    print(f"    Balanced Accuracy = {bal_ac:.4f}")
+    print(f"    Precision         = {prec:.4f}")
+    print(f"    Recall            = {rec:.4f}")
+    print(f"    Specificity       = {spec:.4f}")
+    print(f"    F1-Score          = {f1:.4f}")
+    print(f"    AUC-ROC           = {auc:.4f}")
+    print(f"    PR-AUC            = {pr_auc:.4f}")
+    print(f"    Log Loss          = {loglss:.4f}")
+    print(f"    Brier Score       = {brier:.4f}")
+    print(f"    MCC               = {mcc:.4f}")
+    print(f"    Cohen Kappa       = {kappa:.4f}")
     sys.stdout.flush()
 
-    return acc, prec, rec, f1, auc
+    return {
+        "accuracy": acc, "balanced_accuracy": bal_ac,
+        "precision": prec, "recall": rec, "specificity": spec,
+        "f1": f1, "auc": auc, "pr_auc": pr_auc,
+        "log_loss": loglss, "brier_score": brier,
+        "mcc": mcc, "cohen_kappa": kappa,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -254,25 +279,13 @@ class SimpleBagging(Strategy):
 
         print(f"\n  [Servidor] METRICAS ENSEMBLE Round {server_round}/{NUM_ROUNDS} "
               f"({len(self.client_models)} modelos agregados):")
-        acc, prec, rec, f1, auc = print_metrics(
+        metrics = print_metrics(
             "Avaliacao no conjunto de teste:", self.y_test, y_pred, y_prob,
         )
 
-        # ── Logging CSV ──────────────────────────────────────────────────
-        # Chamado aqui porque evaluate() é invocado pelo Flower ao final
-        # de cada round, após aggregate_fit(), com acesso às métricas finais.
-        _log_round(server_round, {
-            "accuracy":  acc,
-            "precision": prec,
-            "recall":    rec,
-            "f1":        f1,
-            "auc":       auc,
-        })
-        # ─────────────────────────────────────────────────────────────────
+        _log_round(server_round, metrics)
 
-        return float(1 - acc), {
-            "accuracy": acc, "precision": prec, "recall": rec, "f1": f1, "auc": auc,
-        }
+        return float(1 - metrics["accuracy"]), metrics
 
 
 # ---------------------------------------------------------------------------
@@ -375,23 +388,13 @@ class SimpleCycling(Strategy):
         trained_client = (self.current_idx - 1) % self.num_clients
         print(f"\n  [Servidor] METRICAS Round {server_round}/{NUM_ROUNDS} "
               f"(modelo do cliente {trained_client}):")
-        acc, prec, rec, f1, auc = print_metrics(
+        metrics = print_metrics(
             "Avaliacao no conjunto de teste:", self.y_test, y_pred, y_prob,
         )
 
-        # ── Logging CSV ──────────────────────────────────────────────────
-        _log_round(server_round, {
-            "accuracy":  acc,
-            "precision": prec,
-            "recall":    rec,
-            "f1":        f1,
-            "auc":       auc,
-        })
-        # ─────────────────────────────────────────────────────────────────
+        _log_round(server_round, metrics)
 
-        return float(1 - acc), {
-            "accuracy": acc, "precision": prec, "recall": rec, "f1": f1, "auc": auc,
-        }
+        return float(1 - metrics["accuracy"]), metrics
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +406,7 @@ def main():
     parser.add_argument("--model",    type=str, required=True,
                         choices=["xgboost", "lightgbm", "catboost"])
     parser.add_argument("--strategy", type=str, required=True,
-                        choices=["bagging", "cycling"])
+                        choices=["bagging", "cycling", "sdn-bagging", "sdn-cycling"])
     args = parser.parse_args()
 
     print(f"\n{'='*60}")
@@ -413,11 +416,18 @@ def main():
 
     X_test, y_test = load_higgs_test_data()
 
-    strategy = (
-        SimpleBagging(NUM_CLIENTS, X_test, y_test)
-        if args.strategy == "bagging"
-        else SimpleCycling(NUM_CLIENTS, X_test, y_test)
-    )
+    if args.strategy == "bagging":
+        strategy = SimpleBagging(NUM_CLIENTS, X_test, y_test)
+    elif args.strategy == "cycling":
+        strategy = SimpleCycling(NUM_CLIENTS, X_test, y_test)
+    elif args.strategy == "sdn-bagging":
+        from sdn_strategy import SDNBagging, set_log_round_fn
+        strategy = SDNBagging(NUM_CLIENTS, X_test, y_test)
+        set_log_round_fn(_log_round)
+    elif args.strategy == "sdn-cycling":
+        from sdn_strategy import SDNCycling, set_log_round_fn
+        strategy = SDNCycling(NUM_CLIENTS, X_test, y_test)
+        set_log_round_fn(_log_round)
 
     print(f"\n[Servidor] Configuracao:")
     print(f"    Modelo:      {args.model}")

@@ -7,10 +7,13 @@ Uso:
     python plot_resultados.py --com com_sdn_resultados.csv --sem sem_sdn_resultados.csv
 
 Saida:
-    metricas_fl_sdn.png     — Accuracy e F1 x Tempo
-    duracao_por_round.png   — Duracao por round (barras)
-    auc_por_round.png       — AUC-ROC x Round
-    reducao_tempo.txt       — Reducao percentual de tempo (numero para o abstract)
+    metricas_fl_sdn.png           — Accuracy e F1 x Tempo
+    duracao_por_round.png         — Duracao por round (barras)
+    auc_por_round.png             — AUC-ROC x Round
+    metricas_classificacao.png    — Precision, Recall, Specificity, Balanced Acc
+    metricas_calibracao.png       — Log Loss, Brier Score, MCC, Cohen Kappa
+    pr_auc_por_round.png          — PR-AUC x Round
+    reducao_tempo.txt             — Reducao percentual de tempo
 """
 
 import argparse
@@ -42,17 +45,28 @@ def parse_args():
 # Helpers
 # ---------------------------------------------------------------------------
 
+_REQUIRED_COLS = ["round", "elapsed_sec", "accuracy", "f1", "auc"]
+_OPTIONAL_COLS = [
+    "balanced_accuracy", "precision", "recall", "specificity",
+    "pr_auc", "log_loss", "brier_score", "mcc", "cohen_kappa",
+]
+
+
 def load(path: str, label: str) -> pd.DataFrame:
     if not os.path.exists(path):
         print(f"[AVISO] Arquivo nao encontrado: {path}")
         print(f"        Execute o experimento '{label}' antes de plotar.")
         sys.exit(1)
     df = pd.read_csv(path)
-    for col in ["round", "elapsed_sec", "accuracy", "f1", "auc"]:
+    for col in _REQUIRED_COLS:
         if col not in df.columns:
             print(f"[ERRO] Coluna '{col}' ausente em {path}.")
             sys.exit(1)
     return df
+
+
+def _has_col(com: pd.DataFrame, sem: pd.DataFrame, col: str) -> bool:
+    return col in com.columns and col in sem.columns
 
 
 def tempo_para_atingir(df: pd.DataFrame, frac: float, metric: str = "accuracy") -> float:
@@ -167,6 +181,123 @@ def plot_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
 
 
 # ---------------------------------------------------------------------------
+# Figura 4 — Metricas de classificacao (Precision, Recall, Specificity, Bal Acc)
+# ---------------------------------------------------------------------------
+
+def plot_metricas_classificacao(com: pd.DataFrame, sem: pd.DataFrame):
+    metrics_info = [
+        ("precision",         "Precision"),
+        ("recall",            "Recall (Sensibilidade)"),
+        ("specificity",       "Specificity (Especificidade)"),
+        ("balanced_accuracy", "Balanced Accuracy"),
+    ]
+    available = [(col, label) for col, label in metrics_info if _has_col(com, sem, col)]
+    if not available:
+        print("[AVISO] Metricas de classificacao nao disponiveis no CSV, pulando.")
+        return
+
+    n = len(available)
+    cols = min(n, 2)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
+    fig.suptitle("Metricas de Classificacao — Com vs Sem SDN", fontsize=14, fontweight="bold")
+    if n == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
+
+    for ax, (col, label) in zip(axes, available):
+        ax.plot(sem["round"], sem[col], "r--o", markersize=4, linewidth=2, label="Sem SDN")
+        ax.plot(com["round"], com[col], "b-o",  markersize=4, linewidth=2, label="Com SDN")
+        ax.set_xlabel("Round", fontsize=11)
+        ax.set_ylabel(label, fontsize=11)
+        ax.set_title(label, fontsize=12)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+    # Esconde eixos extras
+    for i in range(n, len(axes)):
+        axes[i].set_visible(False)
+
+    plt.tight_layout()
+    out = "metricas_classificacao.png"
+    plt.savefig(out, dpi=150)
+    plt.close()
+    print(f"[OK] {out}")
+
+
+# ---------------------------------------------------------------------------
+# Figura 5 — Metricas de calibracao (Log Loss, Brier, MCC, Cohen Kappa)
+# ---------------------------------------------------------------------------
+
+def plot_metricas_calibracao(com: pd.DataFrame, sem: pd.DataFrame):
+    metrics_info = [
+        ("log_loss",     "Log Loss"),
+        ("brier_score",  "Brier Score"),
+        ("mcc",          "MCC (Matthews)"),
+        ("cohen_kappa",  "Cohen Kappa"),
+    ]
+    available = [(col, label) for col, label in metrics_info if _has_col(com, sem, col)]
+    if not available:
+        print("[AVISO] Metricas de calibracao nao disponiveis no CSV, pulando.")
+        return
+
+    n = len(available)
+    cols = min(n, 2)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
+    fig.suptitle("Metricas de Calibracao e Concordancia — Com vs Sem SDN",
+                 fontsize=14, fontweight="bold")
+    if n == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
+
+    for ax, (col, label) in zip(axes, available):
+        ax.plot(sem["round"], sem[col], "r--o", markersize=4, linewidth=2, label="Sem SDN")
+        ax.plot(com["round"], com[col], "b-o",  markersize=4, linewidth=2, label="Com SDN")
+        ax.set_xlabel("Round", fontsize=11)
+        ax.set_ylabel(label, fontsize=11)
+        ax.set_title(label, fontsize=12)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+    for i in range(n, len(axes)):
+        axes[i].set_visible(False)
+
+    plt.tight_layout()
+    out = "metricas_calibracao.png"
+    plt.savefig(out, dpi=150)
+    plt.close()
+    print(f"[OK] {out}")
+
+
+# ---------------------------------------------------------------------------
+# Figura 6 — PR-AUC x Round
+# ---------------------------------------------------------------------------
+
+def plot_pr_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
+    if not _has_col(com, sem, "pr_auc"):
+        print("[AVISO] PR-AUC nao disponivel no CSV, pulando.")
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(sem["round"], sem["pr_auc"], "r--o", markersize=5, linewidth=2, label="Sem SDN")
+    ax.plot(com["round"], com["pr_auc"], "b-o",  markersize=5, linewidth=2, label="Com SDN")
+    ax.set_xlabel("Round", fontsize=12)
+    ax.set_ylabel("PR-AUC", fontsize=12)
+    ax.set_title("PR-AUC (Average Precision) por round", fontsize=13)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    out = "pr_auc_por_round.png"
+    plt.savefig(out, dpi=150)
+    plt.close()
+    print(f"[OK] {out}")
+
+
+# ---------------------------------------------------------------------------
 # Texto — reducao percentual de tempo
 # ---------------------------------------------------------------------------
 
@@ -201,6 +332,24 @@ def calcular_reducao(com: pd.DataFrame, sem: pd.DataFrame, frac: float):
         f"  Com SDN: {com['auc'].iloc[-1]:.4f}",
     ]
 
+    # Adiciona metricas extras se disponiveis
+    extra_metrics = [
+        ("mcc",              "MCC (Matthews)"),
+        ("cohen_kappa",      "Cohen Kappa"),
+        ("balanced_accuracy","Balanced Accuracy"),
+        ("pr_auc",           "PR-AUC"),
+        ("log_loss",         "Log Loss"),
+        ("brier_score",      "Brier Score"),
+    ]
+    for col, label in extra_metrics:
+        if col in com.columns and col in sem.columns:
+            linhas += [
+                "",
+                f"{label} final:",
+                f"  Sem SDN: {sem[col].iloc[-1]:.4f}",
+                f"  Com SDN: {com[col].iloc[-1]:.4f}",
+            ]
+
     out = "reducao_tempo.txt"
     with open(out, "w") as f:
         f.write("\n".join(linhas) + "\n")
@@ -228,6 +377,9 @@ def main():
     plot_metricas_tempo(com, sem)
     plot_duracao_round(com, sem)
     plot_auc_round(com, sem)
+    plot_metricas_classificacao(com, sem)
+    plot_metricas_calibracao(com, sem)
+    plot_pr_auc_round(com, sem)
     calcular_reducao(com, sem, args.threshold_frac)
 
     print("\nPronto. Arquivos gerados no diretorio atual.")
