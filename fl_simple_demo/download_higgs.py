@@ -16,7 +16,7 @@ import numpy as np
 from sklearn.datasets import fetch_openml
 from config import N_SAMPLES, TEST_SIZE, RANDOM_SEED
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "higgs")
 X_PATH = os.path.join(DATA_DIR, "higgs_X.npy")
 Y_PATH = os.path.join(DATA_DIR, "higgs_y.npy")
 

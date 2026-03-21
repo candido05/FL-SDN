@@ -4,9 +4,7 @@ Script auxiliar que lanca servidor + clientes em processos separados.
 Uso:
     python run_all.py --model xgboost --strategy bagging
     python run_all.py --model lightgbm --strategy cycling
-    python run_all.py --model catboost --strategy bagging
-    python run_all.py --model xgboost --strategy sdn-bagging
-    python run_all.py --model xgboost --strategy sdn-cycling
+    python run_all.py --model catboost --strategy sdn-bagging
 """
 
 import argparse
@@ -14,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from config import NUM_CLIENTS, NUM_ROUNDS, LOCAL_EPOCHS, SERVER_PORT, CLIENT_CONNECT_ADDRESS
+from config import NUM_CLIENTS, NUM_ROUNDS, LOCAL_EPOCHS, CLIENT_CONNECT_ADDRESS
 
 
 def main():
@@ -43,8 +41,6 @@ def main():
     print(f"[Launcher] Iniciando servidor...")
     server_proc = subprocess.Popen(server_cmd)
 
-    # Esperar servidor e dataset carregarem
-    # O Higgs pode demorar na primeira vez (download)
     print(f"[Launcher] Aguardando servidor carregar dataset (15s)...")
     time.sleep(15)
 

@@ -207,3 +207,24 @@ marimo/_lsp/
 __marimo__/
 
 CLAUDE.md
+
+# Dados do dataset (grandes, nao versionar)
+fl_simple_demo/data/**/*.npy
+fl_simple_demo/data/*.npy
+
+# CatBoost cache
+catboost_info/
+
+# Diretorio de saida (logs, CSVs, graficos por execucao)
+fl_simple_demo/output/
+
+# CSVs de resultado soltos (gerados pelo experimento — legado)
+*_resultados.csv
+*_sdn_metricas.csv
+
+# Graficos soltos (legado)
+*.png
+reducao_tempo.txt
+
+# Claude settings locais
+.claude/

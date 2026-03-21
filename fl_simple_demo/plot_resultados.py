@@ -21,9 +21,10 @@ import os
 import sys
 
 import pandas as pd
-import matplotlib.pyplot as plt
+# Bug fix: matplotlib.use() DEVE ser chamado ANTES de importar pyplot
 import matplotlib
-matplotlib.use("Agg")   # sem display; compativel com containers/SSH
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +37,8 @@ def parse_args():
                         help="CSV do experimento COM SDN")
     parser.add_argument("--sem", default="sem_sdn_resultados.csv",
                         help="CSV do experimento SEM SDN")
+    parser.add_argument("--run-dir", default=None,
+                        help="Diretorio de saida para salvar graficos (default: dir do CSV com_sdn)")
     parser.add_argument("--threshold-frac", type=float, default=0.95,
                         help="Fracao da accuracy maxima para calcular reducao (default: 0.95)")
     return parser.parse_args()
@@ -46,10 +49,6 @@ def parse_args():
 # ---------------------------------------------------------------------------
 
 _REQUIRED_COLS = ["round", "elapsed_sec", "accuracy", "f1", "auc"]
-_OPTIONAL_COLS = [
-    "balanced_accuracy", "precision", "recall", "specificity",
-    "pr_auc", "log_loss", "brier_score", "mcc", "cohen_kappa",
-]
 
 
 def load(path: str, label: str) -> pd.DataFrame:
@@ -82,7 +81,7 @@ def tempo_para_atingir(df: pd.DataFrame, frac: float, metric: str = "accuracy") 
 # Figura 1 — Accuracy e F1 x Tempo
 # ---------------------------------------------------------------------------
 
-def plot_metricas_tempo(com: pd.DataFrame, sem: pd.DataFrame):
+def plot_metricas_tempo(com: pd.DataFrame, sem: pd.DataFrame, out_dir: str = "."):
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     fig.suptitle("Federated Learning — impacto do SDN", fontsize=14, fontweight="bold")
 
@@ -96,7 +95,6 @@ def plot_metricas_tempo(com: pd.DataFrame, sem: pd.DataFrame):
         ax.plot(com["elapsed_sec"], com[metric],
                 "b-",  linewidth=2, marker="o", markersize=4, label="Com SDN")
 
-        # Linha de referencia no limiar de 95%
         threshold = max(sem[metric].max(), com[metric].max()) * 0.95
         ax.axhline(threshold, color="gray", linestyle=":", linewidth=1, alpha=0.7,
                    label=f"95% do maximo ({threshold:.3f})")
@@ -108,7 +106,7 @@ def plot_metricas_tempo(com: pd.DataFrame, sem: pd.DataFrame):
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out = "metricas_fl_sdn.png"
+    out = os.path.join(out_dir, "metricas_fl_sdn.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"[OK] {out}")
@@ -118,7 +116,7 @@ def plot_metricas_tempo(com: pd.DataFrame, sem: pd.DataFrame):
 # Figura 2 — Duracao por round
 # ---------------------------------------------------------------------------
 
-def plot_duracao_round(com: pd.DataFrame, sem: pd.DataFrame):
+def plot_duracao_round(com: pd.DataFrame, sem: pd.DataFrame, out_dir: str = "."):
     com = com.copy()
     sem = sem.copy()
 
@@ -149,7 +147,7 @@ def plot_duracao_round(com: pd.DataFrame, sem: pd.DataFrame):
     ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
-    out = "duracao_por_round.png"
+    out = os.path.join(out_dir, "duracao_por_round.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"[OK] {out}")
@@ -159,7 +157,7 @@ def plot_duracao_round(com: pd.DataFrame, sem: pd.DataFrame):
 # Figura 3 — AUC-ROC x Round
 # ---------------------------------------------------------------------------
 
-def plot_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
+def plot_auc_round(com: pd.DataFrame, sem: pd.DataFrame, out_dir: str = "."):
     fig, ax = plt.subplots(figsize=(8, 4))
 
     ax.plot(sem["round"], sem["auc"],
@@ -174,17 +172,17 @@ def plot_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out = "auc_por_round.png"
+    out = os.path.join(out_dir, "auc_por_round.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"[OK] {out}")
 
 
 # ---------------------------------------------------------------------------
-# Figura 4 — Metricas de classificacao (Precision, Recall, Specificity, Bal Acc)
+# Figura 4 — Metricas de classificacao
 # ---------------------------------------------------------------------------
 
-def plot_metricas_classificacao(com: pd.DataFrame, sem: pd.DataFrame):
+def plot_metricas_classificacao(com: pd.DataFrame, sem: pd.DataFrame, out_dir: str = "."):
     metrics_info = [
         ("precision",         "Precision"),
         ("recall",            "Recall (Sensibilidade)"),
@@ -200,7 +198,8 @@ def plot_metricas_classificacao(com: pd.DataFrame, sem: pd.DataFrame):
     cols = min(n, 2)
     rows = (n + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
-    fig.suptitle("Metricas de Classificacao — Com vs Sem SDN", fontsize=14, fontweight="bold")
+    fig.suptitle("Metricas de Classificacao — Com vs Sem SDN",
+                 fontsize=14, fontweight="bold")
     if n == 1:
         axes = [axes]
     else:
@@ -215,22 +214,21 @@ def plot_metricas_classificacao(com: pd.DataFrame, sem: pd.DataFrame):
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
-    # Esconde eixos extras
     for i in range(n, len(axes)):
         axes[i].set_visible(False)
 
     plt.tight_layout()
-    out = "metricas_classificacao.png"
+    out = os.path.join(out_dir, "metricas_classificacao.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"[OK] {out}")
 
 
 # ---------------------------------------------------------------------------
-# Figura 5 — Metricas de calibracao (Log Loss, Brier, MCC, Cohen Kappa)
+# Figura 5 — Metricas de calibracao
 # ---------------------------------------------------------------------------
 
-def plot_metricas_calibracao(com: pd.DataFrame, sem: pd.DataFrame):
+def plot_metricas_calibracao(com: pd.DataFrame, sem: pd.DataFrame, out_dir: str = "."):
     metrics_info = [
         ("log_loss",     "Log Loss"),
         ("brier_score",  "Brier Score"),
@@ -266,7 +264,7 @@ def plot_metricas_calibracao(com: pd.DataFrame, sem: pd.DataFrame):
         axes[i].set_visible(False)
 
     plt.tight_layout()
-    out = "metricas_calibracao.png"
+    out = os.path.join(out_dir, "metricas_calibracao.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"[OK] {out}")
@@ -276,7 +274,7 @@ def plot_metricas_calibracao(com: pd.DataFrame, sem: pd.DataFrame):
 # Figura 6 — PR-AUC x Round
 # ---------------------------------------------------------------------------
 
-def plot_pr_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
+def plot_pr_auc_round(com: pd.DataFrame, sem: pd.DataFrame, out_dir: str = "."):
     if not _has_col(com, sem, "pr_auc"):
         print("[AVISO] PR-AUC nao disponivel no CSV, pulando.")
         return
@@ -291,7 +289,7 @@ def plot_pr_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out = "pr_auc_por_round.png"
+    out = os.path.join(out_dir, "pr_auc_por_round.png")
     plt.savefig(out, dpi=150)
     plt.close()
     print(f"[OK] {out}")
@@ -301,7 +299,7 @@ def plot_pr_auc_round(com: pd.DataFrame, sem: pd.DataFrame):
 # Texto — reducao percentual de tempo
 # ---------------------------------------------------------------------------
 
-def calcular_reducao(com: pd.DataFrame, sem: pd.DataFrame, frac: float):
+def calcular_reducao(com: pd.DataFrame, sem: pd.DataFrame, frac: float, out_dir: str = "."):
     t_sem = tempo_para_atingir(sem, frac, "accuracy")
     t_com = tempo_para_atingir(com, frac, "accuracy")
     reducao_acc = (t_sem - t_com) / t_sem * 100 if t_sem > 0 else 0.0
@@ -332,7 +330,6 @@ def calcular_reducao(com: pd.DataFrame, sem: pd.DataFrame, frac: float):
         f"  Com SDN: {com['auc'].iloc[-1]:.4f}",
     ]
 
-    # Adiciona metricas extras se disponiveis
     extra_metrics = [
         ("mcc",              "MCC (Matthews)"),
         ("cohen_kappa",      "Cohen Kappa"),
@@ -342,7 +339,7 @@ def calcular_reducao(com: pd.DataFrame, sem: pd.DataFrame, frac: float):
         ("brier_score",      "Brier Score"),
     ]
     for col, label in extra_metrics:
-        if col in com.columns and col in sem.columns:
+        if _has_col(com, sem, col):
             linhas += [
                 "",
                 f"{label} final:",
@@ -350,7 +347,7 @@ def calcular_reducao(com: pd.DataFrame, sem: pd.DataFrame, frac: float):
                 f"  Com SDN: {com[col].iloc[-1]:.4f}",
             ]
 
-    out = "reducao_tempo.txt"
+    out = os.path.join(out_dir, "reducao_tempo.txt")
     with open(out, "w") as f:
         f.write("\n".join(linhas) + "\n")
 
@@ -371,18 +368,23 @@ def main():
     print(f"Carregando: {args.sem}")
     sem = load(args.sem, "sem_sdn")
 
+    # Determina diretorio de saida
+    out_dir = args.run_dir or os.path.dirname(os.path.abspath(args.com)) or "."
+    os.makedirs(out_dir, exist_ok=True)
+
     print(f"\nRounds com SDN: {len(com)} | Sem SDN: {len(sem)}")
+    print(f"Saida: {out_dir}")
     print()
 
-    plot_metricas_tempo(com, sem)
-    plot_duracao_round(com, sem)
-    plot_auc_round(com, sem)
-    plot_metricas_classificacao(com, sem)
-    plot_metricas_calibracao(com, sem)
-    plot_pr_auc_round(com, sem)
-    calcular_reducao(com, sem, args.threshold_frac)
+    plot_metricas_tempo(com, sem, out_dir)
+    plot_duracao_round(com, sem, out_dir)
+    plot_auc_round(com, sem, out_dir)
+    plot_metricas_classificacao(com, sem, out_dir)
+    plot_metricas_calibracao(com, sem, out_dir)
+    plot_pr_auc_round(com, sem, out_dir)
+    calcular_reducao(com, sem, args.threshold_frac, out_dir)
 
-    print("\nPronto. Arquivos gerados no diretorio atual.")
+    print(f"\nPronto. Arquivos gerados em: {out_dir}")
 
 
 if __name__ == "__main__":
