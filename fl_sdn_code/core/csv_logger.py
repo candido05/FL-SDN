@@ -17,11 +17,27 @@ from typing import Dict, List
 
 from core.metrics import CSV_METRIC_FIELDS
 
+# Campos de recursos e rede agregados por round
+RESOURCE_FIELDS = [
+    "training_time_avg", "model_size_kb_avg",
+    "cpu_percent_avg", "ram_mb_avg", "ram_peak_mb_max",
+]
+
+NETWORK_FIELDS = [
+    "bandwidth_mbps_avg", "latency_ms_avg", "packet_loss_avg",
+    "jitter_ms_avg", "efficiency_score_avg",
+]
+
 
 class CSVLogger:
     """Logger de metricas por round em CSV incremental."""
 
-    _CSV_FIELDS = ["round", "elapsed_sec"] + CSV_METRIC_FIELDS
+    _CSV_FIELDS = (
+        ["round", "elapsed_sec"]
+        + CSV_METRIC_FIELDS
+        + RESOURCE_FIELDS
+        + NETWORK_FIELDS
+    )
 
     def __init__(self, run_dir: str, exp_name: str = None):
         self._exp_name = exp_name or os.environ.get("EXP", "experimento")
@@ -46,18 +62,52 @@ class CSVLogger:
         """Inicia o cronometro. Chamar antes de start_server()."""
         self._t_start = time.time()
 
-    def log_round(self, server_round: int, metrics: Dict) -> None:
-        """Registra metricas do round atual no CSV e imprime resumo."""
+    def log_round(
+        self,
+        server_round: int,
+        metrics: Dict,
+        resource_metrics: Dict = None,
+        network_metrics: Dict = None,
+    ) -> None:
+        """
+        Registra metricas do round atual no CSV e imprime resumo.
+
+        Args:
+            metrics: Metricas de modelo (accuracy, f1, auc, ...).
+            resource_metrics: Metricas de recursos agregadas dos clientes
+                (training_time_avg, cpu_percent_avg, ram_mb_avg, ...).
+            network_metrics: Metricas de rede agregadas
+                (bandwidth_mbps_avg, latency_ms_avg, ...).
+        """
         elapsed = round(time.time() - self._t_start, 2)
         row = {"round": server_round, "elapsed_sec": elapsed}
         for field in CSV_METRIC_FIELDS:
             row[field] = round(metrics.get(field, 0.0), 4)
+
+        # Recursos
+        rm = resource_metrics or {}
+        for field in RESOURCE_FIELDS:
+            row[field] = round(rm.get(field, 0.0), 2)
+
+        # Rede
+        nm = network_metrics or {}
+        for field in NETWORK_FIELDS:
+            row[field] = round(nm.get(field, 0.0), 4)
+
         self._rows.append(row)
 
         print(f"  [LOG] Round {server_round:2d} | {elapsed:7.1f}s | "
               f"acc={row['accuracy']:.4f} | f1={row['f1']:.4f} | "
               f"auc={row['auc']:.4f} | mcc={row['mcc']:.4f} | "
               f"kappa={row['cohen_kappa']:.4f}")
+        if rm:
+            print(f"        CPU={row['cpu_percent_avg']:.1f}% | "
+                  f"RAM={row['ram_mb_avg']:.1f}MB | "
+                  f"Tempo={row['training_time_avg']:.1f}s")
+        if nm:
+            print(f"        BW={row['bandwidth_mbps_avg']:.1f}Mbps | "
+                  f"Lat={row['latency_ms_avg']:.1f}ms | "
+                  f"Loss={row['packet_loss_avg']:.4f}")
         sys.stdout.flush()
 
         with open(self._log_file, "w", newline="") as f:

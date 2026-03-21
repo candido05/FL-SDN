@@ -120,7 +120,12 @@ class SDNCycling(BaseStrategy):
             adapted = base_epochs
         print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {base_epochs} → {adapted} epocas")
 
-        # 6. Log SDN
+        # 6. Agrega metricas de rede para o CSV principal
+        self._last_network_metrics = self._aggregate_network_metrics(
+            [selected_cid], net_metrics, {selected_cid: score},
+        )
+
+        # 7. Log SDN
         if self._sdn_logger:
             self._sdn_logger.log_round(
                 server_round, [selected_cid], net_metrics,
@@ -172,5 +177,7 @@ class SDNCycling(BaseStrategy):
         sys.stdout.flush()
 
         remove_qos_policies([cid])
+
+        self._aggregate_resource_metrics(results)
 
         return None, {"trained_client": cid}

@@ -102,6 +102,8 @@ class SimpleCycling(BaseStrategy):
               f"{(self.current_idx + 1) % self.num_clients}")
         sys.stdout.flush()
 
+        self._aggregate_resource_metrics(results)
+
         prev = self.current_idx
         self.current_idx = (self.current_idx + 1) % self.num_clients
         return None, {"trained_client": prev}

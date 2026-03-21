@@ -109,5 +109,7 @@ class SimpleBagging(BaseStrategy):
         if failures:
             print(f"  [Servidor] AVISO: {len(failures)} falha(s)")
 
+        self._aggregate_resource_metrics(results)
+
         sys.stdout.flush()
         return None, {"num_models": len(self.client_models)}

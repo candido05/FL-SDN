@@ -119,7 +119,12 @@ class SDNBagging(BaseStrategy):
             adapted_epochs[cid] = adapted
             print(f"  [SDN] Cliente {cid} ({cat}): {base_epochs} → {adapted} epocas")
 
-        # 6. Log SDN
+        # 6. Agrega metricas de rede para o CSV principal
+        self._last_network_metrics = self._aggregate_network_metrics(
+            selected_ids, net_metrics, eligible,
+        )
+
+        # 7. Log SDN
         if self._sdn_logger is None:
             print("  [SDN-Bagging] AVISO: SDNMetricsLogger nao configurado (set_logger nao chamado)")
         if self._sdn_logger:
@@ -188,6 +193,8 @@ class SDNBagging(BaseStrategy):
             print(f"  [SDN-Bagging] AVISO: {len(failures)} falha(s)")
 
         remove_qos_policies(list(self.client_models.keys()))
+
+        self._aggregate_resource_metrics(results)
 
         sys.stdout.flush()
         return None, {"num_models": len(self.client_models)}
