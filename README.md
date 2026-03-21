@@ -7,7 +7,7 @@ Usa o dataset **Higgs** (classificacao binaria de particulas) com modelos gradie
 ## Arquitetura do Codigo
 
 ```
-fl_simple_demo/
+fl_sdn_code/
 ├── server.py                  # Entry point: servidor Flower (gRPC)
 ├── client.py                  # Entry point: cliente Flower (gRPC)
 ├── run_all.py                 # Launcher: servidor + N clientes em subprocessos
@@ -135,7 +135,7 @@ Containers GNS3 (Docker fl-node:latest)
 
 ### Setup local
 ```bash
-cd fl_simple_demo
+cd fl_sdn_code
 pip install -r requirements.txt
 python download_higgs.py        # baixa dataset (1x)
 python run_all.py --model xgboost --strategy bagging

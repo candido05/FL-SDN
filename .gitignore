@@ -209,14 +209,14 @@ __marimo__/
 CLAUDE.md
 
 # Dados do dataset (grandes, nao versionar)
-fl_simple_demo/data/**/*.npy
-fl_simple_demo/data/*.npy
+fl_sdn_code/data/**/*.npy
+fl_sdn_code/data/*.npy
 
 # CatBoost cache
 catboost_info/
 
 # Diretorio de saida (logs, CSVs, graficos por execucao)
-fl_simple_demo/output/
+fl_sdn_code/output/
 
 # CSVs de resultado soltos (gerados pelo experimento — legado)
 *_resultados.csv

@@ -103,16 +103,16 @@ reducao_tempo.txt
 catboost_info/
 
 # Backup (referencia historica, nao rastrear)
-fl_simple_demo/backup/
+fl_sdn_code/backup/
 ```
 
 ---
 
-### 7. Mover backup para fora do fl_simple_demo
+### 7. Mover backup para fora do fl_sdn_code
 
-**Problema**: A pasta `backup/` dentro de `fl_simple_demo/` eh copiada para a imagem Docker pelo `COPY fl_simple_demo/ /fl/`. Isso adiciona arquivos desnecessarios a imagem.
+**Problema**: A pasta `backup/` dentro de `fl_sdn_code/` eh copiada para a imagem Docker pelo `COPY fl_sdn_code/ /fl/`. Isso adiciona arquivos desnecessarios a imagem.
 
-**Sugestao**: Mover `fl_simple_demo/backup/` para `backup/` na raiz do projeto ou usar `.dockerignore`.
+**Sugestao**: Mover `fl_sdn_code/backup/` para `backup/` na raiz do projeto ou usar `.dockerignore`.
 
 ---
 

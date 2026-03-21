@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     iperf3 net-tools curl procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY fl_simple_demo/ /fl/
+COPY fl_sdn_code/ /fl/
 WORKDIR /fl
 
 RUN pip3 install --no-cache-dir \
