@@ -1,0 +1,208 @@
+================================================================================
+  FL SIMPLE DEMO - INSTRUCOES DE AMBIENTE E EXECUCAO
+================================================================================
+
+1. CRIAR AMBIENTE VIRTUAL
+--------------------------------------------------------------------------------
+
+  No WSL (recomendado - evita erros de I/O):
+
+    cd ~
+    python3 -m venv ~/fl_demo_env
+    source ~/fl_demo_env/bin/activate
+
+  No Windows (PowerShell):
+
+    cd C:\Users\candi\OneDrive\Desktop\Federated-Learning\fl_simple_demo
+    python -m venv venv
+    venv\Scripts\activate
+
+  No Windows (CMD):
+
+    cd C:\Users\candi\OneDrive\Desktop\Federated-Learning\fl_simple_demo
+    python -m venv venv
+    venv\Scripts\activate.bat
+
+
+2. INSTALAR DEPENDENCIAS
+--------------------------------------------------------------------------------
+
+    pip install --upgrade pip
+    pip install -r requirements.txt
+
+  Dependencias:
+    - flwr >= 1.6.0
+    - xgboost >= 2.0.0
+    - lightgbm >= 4.0.0
+    - catboost >= 1.2.0
+    - scikit-learn >= 1.3.0
+    - numpy >= 1.24.0
+
+
+3. CONFIGURACAO (config.py)
+--------------------------------------------------------------------------------
+
+  Antes de executar, abra o arquivo config.py e ajuste conforme necessario:
+
+  REDE:
+    SERVER_HOST            = "0.0.0.0"        IP do servidor (0.0.0.0 = todas interfaces)
+    SERVER_PORT            = 8080             Porta gRPC
+    CLIENT_CONNECT_ADDRESS = "127.0.0.1:8080" Endereco que os clientes usam
+
+  TREINAMENTO:
+    NUM_CLIENTS            = 3               Quantos clientes federados
+    NUM_ROUNDS             = 5               Rounds servidor-clientes
+    LOCAL_EPOCHS           = 100             Estimadores por treino local
+    LOG_EVERY              = 10              Mostrar progresso a cada N epocas
+
+  DATASET:
+    N_SAMPLES              = 50000           Amostras do Higgs (total)
+    TEST_SIZE              = 0.2             Fracao para teste
+    RANDOM_SEED            = 42              Seed de reproducibilidade
+
+  HIPERPARAMETROS:
+    XGBOOST_PARAMS         = {...}           Parametros do XGBoost
+    LIGHTGBM_PARAMS        = {...}           Parametros do LightGBM
+    CATBOOST_PARAMS        = {...}           Parametros do CatBoost
+
+  NOTA: Para rodar em maquinas diferentes, ajuste CLIENT_CONNECT_ADDRESS
+        para o IP real da maquina do servidor (ex: "192.168.1.100:8080").
+
+
+4. EXECUCAO AUTOMATICA (um comando)
+--------------------------------------------------------------------------------
+
+  Navegar ate a pasta:
+
+    cd C:\Users\candi\OneDrive\Desktop\Federated-Learning\fl_simple_demo
+    # ou no WSL:
+    cd /mnt/c/Users/candi/OneDrive/Desktop/Federated-Learning/fl_simple_demo
+
+  Executar (6 combinacoes possiveis):
+
+    python run_all.py --model xgboost  --strategy bagging
+    python run_all.py --model xgboost  --strategy cycling
+    python run_all.py --model lightgbm --strategy bagging
+    python run_all.py --model lightgbm --strategy cycling
+    python run_all.py --model catboost --strategy bagging
+    python run_all.py --model catboost --strategy cycling
+
+  O run_all.py lanca o servidor e todos os clientes automaticamente.
+  Aguarda 15s para o servidor carregar o dataset antes de iniciar clientes.
+
+
+5. EXECUCAO MANUAL (terminais separados)
+--------------------------------------------------------------------------------
+
+  Util para entender a comunicacao cliente-servidor.
+  Abra N+1 terminais (1 servidor + N clientes).
+
+  TERMINAL 1 - Servidor:
+
+    cd fl_simple_demo
+    python server.py --model xgboost --strategy bagging
+
+  Aguarde aparecer "Aguardando N cliente(s) conectarem..."
+
+  TERMINAL 2 - Cliente 0:
+
+    cd fl_simple_demo
+    python client.py --client-id 0 --model xgboost
+
+  TERMINAL 3 - Cliente 1:
+
+    cd fl_simple_demo
+    python client.py --client-id 1 --model xgboost
+
+  TERMINAL 4 - Cliente 2:
+
+    cd fl_simple_demo
+    python client.py --client-id 2 --model xgboost
+
+  O servidor aguarda ate que todos os clientes conectem.
+  IMPORTANTE: --model deve ser o MESMO em todos os terminais.
+
+
+6. EXECUCAO EM MAQUINAS DIFERENTES
+--------------------------------------------------------------------------------
+
+  1. No config.py, ajuste:
+     SERVER_HOST = "0.0.0.0"
+     CLIENT_CONNECT_ADDRESS = "IP_DO_SERVIDOR:8080"
+
+  2. Copie a pasta fl_simple_demo para cada maquina (com mesmo config.py).
+
+  3. Maquina do servidor:
+     python server.py --model xgboost --strategy bagging
+
+  4. Maquinas dos clientes:
+     python client.py --client-id 0 --model xgboost
+     python client.py --client-id 1 --model xgboost
+
+  Certifique-se de que a porta 8080 esta aberta no firewall do servidor.
+
+
+7. O QUE APARECE NO TERMINAL
+--------------------------------------------------------------------------------
+
+  SERVIDOR exibe a cada round:
+    - Numero do round e estrategia
+    - Clientes selecionados
+    - Metricas recebidas de cada cliente (acc, f1, tempo, tamanho modelo)
+    - Metricas ensemble/global: Accuracy, Precision, Recall, F1, AUC
+
+  CLIENTES exibem a cada round:
+    - Inicio do round com informacoes (modelo, epocas, warm start)
+    - Progresso do treino local a cada LOG_EVERY epocas (ex: 10/100, 20/100...)
+    - Metricas finais do round: Accuracy, Precision, Recall, F1, AUC
+    - Tempo de treino e tamanho do modelo
+
+
+8. ESTRATEGIAS
+--------------------------------------------------------------------------------
+
+  Bagging  -> Todos os clientes treinam em paralelo a cada round.
+              Servidor agrega por media de probabilidades (ensemble).
+
+  Cycling  -> Um cliente por round, em sequencia circular (0->1->2->0...).
+              Modelo passa para o proximo cliente com warm start.
+
+
+9. DATASET
+--------------------------------------------------------------------------------
+
+  Higgs (OpenML): classificacao binaria de eventos de particulas.
+  - Download automatico na primeira execucao (~8 MB comprimido)
+  - Fica em cache local (~/.cache/scikit_learn ou AppData)
+  - Subset configuravel via N_SAMPLES no config.py
+  - Sem preprocessamento (features ja numericas)
+
+
+10. RESOLUCAO DE PROBLEMAS
+--------------------------------------------------------------------------------
+
+  Erro: "Port already in use"
+    -> Encerre processos anteriores: kill $(lsof -t -i:8080)
+    -> Ou mude SERVER_PORT no config.py
+
+  Erro: "Connection refused"
+    -> O servidor ainda nao esta rodando ou a porta esta errada.
+    -> Verifique SERVER_PORT e CLIENT_CONNECT_ADDRESS no config.py.
+
+  Erro: "Too few clients" / servidor nao inicia treino
+    -> Nem todos os clientes conectaram. Inicie todos os N clientes.
+    -> Certifique-se que NUM_CLIENTS no config.py bate com o numero
+       de clientes que voce esta lancando.
+
+  Erro: "OSError: [Errno 5] I/O error" (WSL)
+    -> Crie o venv no filesystem Linux (~/), nao em /mnt/c/.
+
+  Download lento do Higgs:
+    -> O dataset e baixado uma vez e fica em cache.
+    -> Reduza N_SAMPLES no config.py para testes rapidos (ex: 10000).
+
+  Treino muito lento:
+    -> Reduza LOCAL_EPOCHS no config.py (ex: 20).
+    -> Reduza N_SAMPLES no config.py (ex: 10000).
+
+================================================================================
