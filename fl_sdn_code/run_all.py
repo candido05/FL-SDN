@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
 
     print(f"{'='*60}")
-    print(f" FL SIMPLE DEMO")
+    print(f" FL-SDN — Federated Learning + Software-Defined Networking")
     print(f" Modelo:      {args.model} | Estrategia: {args.strategy}")
     print(f" Clientes:    {NUM_CLIENTS}")
     print(f" Rounds:      {NUM_ROUNDS}")

@@ -1,5 +1,5 @@
 """
-Configuracoes centralizadas do FL Simple Demo.
+Configuracoes centralizadas do FL-SDN.
 Modifique os valores abaixo conforme necessario.
 """
 

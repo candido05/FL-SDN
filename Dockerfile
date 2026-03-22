@@ -9,13 +9,8 @@ RUN apt-get update && apt-get install -y \
 COPY fl_sdn_code/ /fl/
 WORKDIR /fl
 
-RUN pip3 install --no-cache-dir \
-    "flwr>=1.6.0" \
-    "xgboost>=2.0.0" \
-    "lightgbm>=4.0.0" \
-    "catboost>=1.2.0" \
-    "scikit-learn>=1.3.0" \
-    "numpy>=1.24.0"
+COPY fl_sdn_code/requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Desabilita IPv6 e comportamento agressivo de ARP no boot
 RUN echo "net.ipv6.conf.all.disable_ipv6=1" >> /etc/sysctl.conf && \

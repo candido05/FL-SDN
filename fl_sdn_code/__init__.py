@@ -1,1 +1,1 @@
-"""FL Simple Demo — Federated Learning with SDN integration."""
+"""FL-SDN — Federated Learning with Software-Defined Networking."""
