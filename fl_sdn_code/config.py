@@ -26,15 +26,19 @@ SDN_ADAPTIVE_EPOCHS    = False
 # Garantir modo real:
 SDN_MOCK_MODE          = False
 
+
+
 # Mapeamento client_id → IP (deve bater com o experimento atual):
 SDN_CLIENT_IPS = {
-    0: "172.16.1.20",   # BG-Node-1-cat1
-    1: "172.16.1.30",   # BG-Node-2-cat1
-    2: "172.16.1.100",  # FL-Node-1-cat2
-    3: "172.16.1.70",   # BG-Node-5-cat2
-    4: "172.16.1.40",   # FL-Node-2-cat3
-    5: "172.16.1.80",   # BG-Node-4-cat3
+    0: "172.16.1.10",   # FL-Node-1-cat1
+    1: "172.16.1.16",   # FL-Node-5-cat1
+    2: "172.16.1.11",   # FL-Node-2-cat2
+    3: "172.16.1.14",   # FL-Node-4-cat2
+    4: "172.16.1.13",   # FL-Node-3-cat3
+    5: "172.16.1.17",   # FL-Node-6-cat3
 }
+
+
 
 # Épocas locais por categoria (simula diferença de capacidade computacional)
 LOCAL_EPOCHS_BY_CAT = {
@@ -45,13 +49,14 @@ LOCAL_EPOCHS_BY_CAT = {
 
 # Mapeamento client_id → categoria
 CLIENT_CATEGORIES = {
-    0: "cat1",
-    1: "cat1",
-    2: "cat2",
-    3: "cat2",
-    4: "cat3",
-    5: "cat3",
+    0: "cat1",  # FL-Node-1
+    1: "cat1",  # FL-Node-5
+    2: "cat2",  # FL-Node-2
+    3: "cat2",  # FL-Node-4
+    4: "cat3",  # FL-Node-3
+    5: "cat3",  # FL-Node-6
 }
+
 
 
 CLIENT_CONNECT_ADDRESS = "172.16.1.1:8080"
@@ -121,7 +126,7 @@ CATBOOST_PARAMS = {
 
 # Modo mock: True = gera metricas simuladas (sem ODL real)
 # Util para testes locais e validacao da logica
-SDN_MOCK_MODE = True
+#SDN_MOCK_MODE = True
 
 # Ajustar limiares para alinhar com o SDN (REROUTE_THRESH × 20 Mbps = 15 Mbps):
 SDN_MIN_BANDWIDTH_MBPS = 15.0   # era 10 — alinhado com REROUTE_THRESH do orquestrador
@@ -140,7 +145,7 @@ SDN_SCORE_WEIGHTS = {
 # Adaptacao de epocas locais baseada em rede
 # True = ajusta epocas conforme efficiency_score do cliente
 # False = usa epocas fixas por categoria (comportamento original)
-SDN_ADAPTIVE_EPOCHS = True
+#SDN_ADAPTIVE_EPOCHS = True
 
 # ---------------------------------------------------------------------------
 # Client Health Score — selecao/exclusao dinamica de clientes
@@ -178,11 +183,4 @@ HEALTH_SCORE_THRESHOLD = 0.30
 HEALTH_SCORE_ENABLED = True
 
 # Mapeamento client_id → IP na rede GNS3
-SDN_CLIENT_IPS = {
-    0: "172.16.1.12",
-    1: "172.16.1.12",
-    2: "172.16.1.13",
-    3: "172.16.1.13",
-    4: "172.16.1.14",
-    5: "172.16.1.14",
-}
+
