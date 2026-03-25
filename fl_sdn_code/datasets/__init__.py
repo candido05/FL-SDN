@@ -16,6 +16,6 @@ from datasets.registry import DatasetRegistry
 
 # Importa modulos de dataset para que se auto-registrem
 import datasets.higgs
-import datasets.higgs_full
+#import datasets.higgs_full
 import datasets.epsilon
 import datasets.avazu

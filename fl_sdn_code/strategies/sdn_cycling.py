@@ -39,6 +39,7 @@ class SDNCycling(BaseStrategy):
         self.current_model = None
         self.trained_this_cycle: List[int] = []
         self._sdn_logger = None
+        self._last_net_metrics: Dict = {}  # reutilizado no aggregate_fit (evita double-fetch)
 
         # Health Score tracker
         if HEALTH_SCORE_ENABLED:
@@ -82,7 +83,7 @@ class SDNCycling(BaseStrategy):
 
         print(f"\n{'#'*60}")
         print(f"# SDN-CYCLING - Round {server_round}/{NUM_ROUNDS}")
-        print(f"# Consultando metricas de rede via SDN...")
+        print(f"# Aguardando {self.num_clients} cliente(s)...")
         print(f"{'#'*60}")
         sys.stdout.flush()
 
@@ -104,8 +105,12 @@ class SDNCycling(BaseStrategy):
         if not candidates:
             candidates = list(client_map.keys())
 
+        print(f"# Consultando metricas de rede via SDN...")
+        sys.stdout.flush()
+
         # 1. Consulta metricas de rede
         net_metrics = get_network_metrics(candidates)
+        self._last_net_metrics = net_metrics  # cache para aggregate_fit
 
         # 2. Filtra e calcula scores
         eligible = filter_eligible_clients(net_metrics)
@@ -223,7 +228,8 @@ class SDNCycling(BaseStrategy):
                 },
             }
 
-            net_metrics = get_network_metrics([cid])
+            # Reutiliza metricas de rede ja coletadas no configure_fit (evita timeout duplo)
+            net_metrics = {cid: self._last_net_metrics[cid]} if cid in self._last_net_metrics else get_network_metrics([cid])
             net_scores = filter_eligible_clients(net_metrics)
 
             scores = self._health_tracker.update_round(

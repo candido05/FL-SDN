@@ -43,6 +43,7 @@ class SDNBagging(BaseStrategy):
         self.client_models: Dict[int, object] = {}
         self.best_model = None
         self._sdn_logger = None
+        self._last_net_metrics: Dict = {}  # reutilizado no aggregate_fit (evita double-fetch)
 
         # Health Score tracker
         if HEALTH_SCORE_ENABLED:
@@ -88,7 +89,7 @@ class SDNBagging(BaseStrategy):
 
         print(f"\n{'#'*60}")
         print(f"# SDN-BAGGING - Round {server_round}/{NUM_ROUNDS}")
-        print(f"# Consultando metricas de rede via SDN...")
+        print(f"# Aguardando {self.num_clients} cliente(s)...")
         print(f"{'#'*60}")
         sys.stdout.flush()
 
@@ -101,8 +102,12 @@ class SDNBagging(BaseStrategy):
         client_map = {i: c for i, c in enumerate(clients)}
         all_client_ids = list(client_map.keys())
 
+        print(f"# Consultando metricas de rede via SDN...")
+        sys.stdout.flush()
+
         # 1. Consulta metricas de rede
         net_metrics = get_network_metrics(all_client_ids)
+        self._last_net_metrics = net_metrics  # cache para aggregate_fit
 
         # 2. Filtra e calcula scores
         eligible = filter_eligible_clients(net_metrics)
@@ -264,8 +269,8 @@ class SDNBagging(BaseStrategy):
                 self.client_models, self.X_test, self.y_test,
             )
 
-            # Recupera metricas de rede do configure_fit
-            net_metrics = get_network_metrics(list(client_results.keys()))
+            # Reutiliza metricas de rede ja coletadas no configure_fit (evita timeout duplo)
+            net_metrics = self._last_net_metrics or get_network_metrics(list(client_results.keys()))
             net_scores = filter_eligible_clients(net_metrics)
 
             scores = self._health_tracker.update_round(
