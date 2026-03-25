@@ -22,6 +22,8 @@ from sklearn.model_selection import train_test_split
 from config import (
     XGBOOST_PARAMS, LIGHTGBM_PARAMS, CATBOOST_PARAMS,
     RANDOM_SEED, MAX_TOTAL_TREES, EARLY_STOPPING_ROUNDS, VALIDATION_SPLIT,
+    WARM_START_TREE_DECAY, WARM_START_TREE_MIN_RATIO,
+    WARM_START_LR_DECAY, WARM_START_LR_MIN_RATIO,
 )
 from models.callbacks import XGBoostProgressCallback, lgb_progress_callback
 
@@ -72,6 +74,59 @@ def _apply_tree_cap(n_new, n_existing, label=""):
                   f"limite={MAX_TOTAL_TREES})")
         return capped
     return n_new
+
+
+def _compute_warm_start_schedule(
+    base_lr: float,
+    local_epochs: int,
+    server_round: int,
+    extra_params: dict = None,
+) -> tuple:
+    """
+    Calcula o schedule de decaimento exponencial para warm start.
+
+    Tanto n_estimators quanto learning_rate decaem suavemente conforme
+    os rounds avancam — o modelo ja acumulou base e precisa de ajustes
+    cada vez mais refinados (menor LR, menos arvores novas).
+
+    Formulacao:
+        tree_ratio = max(WARM_START_TREE_MIN_RATIO,
+                         WARM_START_TREE_DECAY ^ (server_round - 1))
+        lr         = max(base_lr * WARM_START_LR_MIN_RATIO,
+                         base_lr * WARM_START_LR_DECAY ^ (server_round - 1))
+
+    Args:
+        base_lr:      Learning rate base do modelo (de XGBOOST_PARAMS etc.).
+        local_epochs: Epocas locais configuradas (LOCAL_EPOCHS).
+        server_round: Round atual do servidor (comeca em 1).
+        extra_params: Hiperparametros tunados (grid search); se contem
+                      'learning_rate', usa esse valor como base.
+
+    Returns:
+        (n_new, lr_adjusted)
+        - n_new:       Numero de novas arvores a adicionar neste round.
+        - lr_adjusted: Learning rate ajustado para este round.
+    """
+    # Se o grid search tuneu o LR, usa o tunado como base para o decay
+    effective_base_lr = base_lr
+    if extra_params and "learning_rate" in extra_params:
+        effective_base_lr = float(extra_params["learning_rate"])
+
+    # Decaimento exponencial do n_estimators (piso = WARM_START_TREE_MIN_RATIO)
+    tree_ratio = max(
+        WARM_START_TREE_MIN_RATIO,
+        WARM_START_TREE_DECAY ** (server_round - 1),
+    )
+    n_new = max(int(local_epochs * tree_ratio), 10)
+
+    # Decaimento exponencial do learning_rate (piso = MIN_RATIO * base)
+    lr_adjusted = max(
+        effective_base_lr * WARM_START_LR_MIN_RATIO,
+        effective_base_lr * WARM_START_LR_DECAY ** (server_round - 1),
+    )
+    lr_adjusted = round(lr_adjusted, 6)
+
+    return n_new, lr_adjusted
 
 
 def _make_val_split(X_train, y_train):
@@ -136,23 +191,32 @@ class ModelFactory:
 @ModelFactory.register("xgboost")
 def _train_xgboost(X_train, y_train, client_id, server_round,
                     local_epochs, warm_start_model, extra_params):
-    # Warm start: reduz n_estimators gradualmente para evitar overfitting
+    # Warm start: decaimento exponencial de n_estimators e learning_rate
+    base_lr = XGBOOST_PARAMS["learning_rate"]
     if warm_start_model is not None:
         n_existing = _count_trees(warm_start_model)
-        reduction = max(0.1, 1.0 - (server_round - 1) * 0.2)
-        n_new = max(int(local_epochs * reduction), 10)
+        n_new, lr_adjusted = _compute_warm_start_schedule(
+            base_lr, local_epochs, server_round, extra_params,
+        )
         # Tree cap
         n_new = _apply_tree_cap(n_new, n_existing, "XGBoost")
         if n_new == 0:
             return warm_start_model
         print(f"    [XGBoost] Warm start: {n_existing} arvores existentes + "
-              f"{n_new} novas (reducao {reduction:.0%} do base {local_epochs})")
+              f"{n_new} novas | lr={lr_adjusted:.5f} "
+              f"(round {server_round}, base={local_epochs})")
     else:
         n_new = local_epochs
+        lr_adjusted = base_lr
+        if extra_params and "learning_rate" in extra_params:
+            lr_adjusted = float(extra_params["learning_rate"])
 
-    params = {**XGBOOST_PARAMS, "n_estimators": n_new}
+    params = {**XGBOOST_PARAMS, "n_estimators": n_new, "learning_rate": lr_adjusted}
     if extra_params:
-        params.update(extra_params)
+        # extra_params pode sobrescrever tudo exceto learning_rate no warm start
+        # (ja calculamos lr_adjusted usando extra_params como base)
+        ep = {k: v for k, v in extra_params.items() if k != "learning_rate"}
+        params.update(ep)
 
     # Validation split para early stopping
     X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)
@@ -192,22 +256,28 @@ def _train_xgboost(X_train, y_train, client_id, server_round,
 @ModelFactory.register("lightgbm")
 def _train_lightgbm(X_train, y_train, client_id, server_round,
                      local_epochs, warm_start_model, extra_params):
+    base_lr = LIGHTGBM_PARAMS["learning_rate"]
     if warm_start_model is not None:
         n_existing = _count_trees_lgb(warm_start_model)
-        reduction = max(0.1, 1.0 - (server_round - 1) * 0.2)
-        n_new = max(int(local_epochs * reduction), 10)
+        n_new, lr_adjusted = _compute_warm_start_schedule(
+            base_lr, local_epochs, server_round, extra_params,
+        )
         # Tree cap
         n_new = _apply_tree_cap(n_new, n_existing, "LightGBM")
         if n_new == 0:
             return warm_start_model
-        print(f"    [LightGBM] Warm start: {n_new} novas iteracoes "
-              f"(reducao {reduction:.0%} do base {local_epochs})")
+        print(f"    [LightGBM] Warm start: {n_new} novas iteracoes | "
+              f"lr={lr_adjusted:.5f} (round {server_round}, base={local_epochs})")
     else:
         n_new = local_epochs
+        lr_adjusted = base_lr
+        if extra_params and "learning_rate" in extra_params:
+            lr_adjusted = float(extra_params["learning_rate"])
 
-    params = {**LIGHTGBM_PARAMS, "n_estimators": n_new}
+    params = {**LIGHTGBM_PARAMS, "n_estimators": n_new, "learning_rate": lr_adjusted}
     if extra_params:
-        params.update(extra_params)
+        ep = {k: v for k, v in extra_params.items() if k != "learning_rate"}
+        params.update(ep)
 
     # Validation split para early stopping
     X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)
@@ -243,22 +313,28 @@ def _train_lightgbm(X_train, y_train, client_id, server_round,
 @ModelFactory.register("catboost")
 def _train_catboost(X_train, y_train, client_id, server_round,
                     local_epochs, warm_start_model, extra_params):
+    base_lr = CATBOOST_PARAMS["learning_rate"]
     if warm_start_model is not None:
         n_existing = _count_trees_catboost(warm_start_model)
-        reduction = max(0.1, 1.0 - (server_round - 1) * 0.2)
-        n_new = max(int(local_epochs * reduction), 10)
+        n_new, lr_adjusted = _compute_warm_start_schedule(
+            base_lr, local_epochs, server_round, extra_params,
+        )
         # Tree cap
         n_new = _apply_tree_cap(n_new, n_existing, "CatBoost")
         if n_new == 0:
             return warm_start_model
-        print(f"    [CatBoost] Warm start: {n_new} novas iteracoes "
-              f"(reducao {reduction:.0%} do base {local_epochs})")
+        print(f"    [CatBoost] Warm start: {n_new} novas iteracoes | "
+              f"lr={lr_adjusted:.5f} (round {server_round}, base={local_epochs})")
     else:
         n_new = local_epochs
+        lr_adjusted = base_lr
+        if extra_params and "learning_rate" in extra_params:
+            lr_adjusted = float(extra_params["learning_rate"])
 
-    params = {**CATBOOST_PARAMS, "iterations": n_new, "verbose": 0}
+    params = {**CATBOOST_PARAMS, "iterations": n_new, "learning_rate": lr_adjusted, "verbose": 0}
     if extra_params:
-        params.update(extra_params)
+        ep = {k: v for k, v in extra_params.items() if k != "learning_rate"}
+        params.update(ep)
 
     # Validation split para early stopping
     X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)

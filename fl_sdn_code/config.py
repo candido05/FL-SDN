@@ -109,12 +109,54 @@ EARLY_STOPPING_ROUNDS = 10         # Parar se validacao nao melhorar em N rounds
 VALIDATION_SPLIT = 0.15            # Fracao do treino local reservada para validacao
                                    # Usada para early stopping (nao treina nesta parcela)
 
+# ---------------------------------------------------------------------------
+# Warm Start — Taxa de decaimento de n_estimators e learning_rate
+# ---------------------------------------------------------------------------
+# Com warm start, cada round parte do modelo ja treinado do round anterior.
+# Para evitar overfitting, tanto n_estimators quanto learning_rate devem
+# decair gradualmente: o modelo precisa de ajustes cada vez menores e mais
+# refinados conforme os rounds avancam.
+#
+# Decaimento exponencial por round (server_round comecando em 1):
+#   valor_round = max(piso, base * decay_rate ^ (server_round - 1))
+#
+# Tabela de exemplo (LOCAL_EPOCHS=100, learning_rate=0.10, NUM_ROUNDS=20):
+#
+#  Round | n_new  | n_ratio | lr     | Observacao
+#  ------+--------+---------+--------+------------------------------
+#    1   |  100   |  100%   | 0.100  | sem warm start
+#    2   |   85   |   85%   | 0.093  | primeiro warm start
+#    3   |   72   |   72%   | 0.086  |
+#    4   |   61   |   61%   | 0.080  |
+#    5   |   52   |   52%   | 0.075  |
+#    6   |   44   |   44%   | 0.069  |
+#    7   |   37   |   37%   | 0.064  |
+#    8   |   32   |   32%   | 0.060  |
+#    9   |   30   |   30%   | 0.056  | piso de n_estimators atingido
+#   10   |   30   |   30%   | 0.052  |
+#   12   |   30   |   30%   | 0.046  |
+#   15   |   30   |   30%   | 0.040  | piso de lr atingido
+#   20   |   30   |   30%   | 0.040  | estabilizado
+#
+# O piso garante que o modelo continue aprendendo dos dados locais.
+
+WARM_START_TREE_DECAY    = 0.85   # Taxa de decaimento exponencial do n_estimators
+WARM_START_TREE_MIN_RATIO = 0.30  # Piso: minimo de epocas locais como fracao de LOCAL_EPOCHS
+
+WARM_START_LR_DECAY      = 0.93   # Taxa de decaimento exponencial do learning_rate
+WARM_START_LR_MIN_RATIO  = 0.40   # Piso: minimo de learning_rate como fracao do valor base
+
+
 # Hiperparametros tunados (preenchido pelo grid_search.py)
 # Se None, usa os parametros base (XGBOOST_PARAMS, etc.)
 # Formato: {"learning_rate": 0.05, "max_depth": 4, ...}
-TUNED_PARAMS = None
-# Para carregar de arquivo JSON gerado pelo grid_search.py:
-# import json; TUNED_PARAMS = json.load(open("tuned_params.json"))
+#
+# Prioridade: env TUNED_PARAMS_JSON > valor manual abaixo
+import json as _json, os as _os
+_tuned_env = _os.environ.get("TUNED_PARAMS_JSON", "")
+TUNED_PARAMS = _json.loads(_tuned_env) if _tuned_env else None
+# Para definir manualmente:
+# TUNED_PARAMS = {"learning_rate": 0.05, "max_depth": 4, ...}
 
 # ---------------------------------------------------------------------------
 # Integracao SDN — Limiares e scoring

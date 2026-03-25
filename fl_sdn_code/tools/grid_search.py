@@ -1,13 +1,15 @@
 """
-Grid Search para hiperparametros do treinamento federado.
+Grid Search rapido para hiperparametros do treinamento federado.
 
-Script pre-experimento que testa combinacoes de hiperparametros
-usando cross-validation e salva os melhores em JSON.
+Testa combinacoes reduzidas de hiperparametros com 2-fold CV
+e salva os melhores em JSON. Pode rodar para cada modelo individualmente
+ou para todos os modelos de uma vez.
 
 Uso:
-    python grid_search.py --dataset higgs --model xgboost
-    python grid_search.py --dataset epsilon --model lightgbm --sample-size 30000
-    python grid_search.py --dataset avazu --model catboost --output tuned_params.json
+    python tools/grid_search.py --dataset higgs --model xgboost
+    python tools/grid_search.py --dataset higgs --all-models
+    python tools/grid_search.py --dataset higgs --model xgboost --output tuned_xgboost.json
+    python tools/grid_search.py --dataset higgs --model xgboost --sample-size 50000
 
 O JSON gerado pode ser carregado no config.py:
     import json
@@ -16,9 +18,13 @@ O JSON gerado pode ser carregado no config.py:
 
 import argparse
 import json
+import os
 import sys
 import time
 import warnings
+
+# Adiciona diretorio pai ao path para encontrar config, datasets, etc.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 warnings.filterwarnings("ignore")
 
@@ -33,30 +39,30 @@ from datasets import DatasetRegistry
 
 
 # ---------------------------------------------------------------------------
-# Grids de hiperparametros por modelo
+# Grids REDUZIDOS — ~20-24 combinacoes por modelo (rapido)
 # ---------------------------------------------------------------------------
 
 XGBOOST_GRID = {
-    "learning_rate": [0.01, 0.03, 0.05, 0.1],
-    "max_depth": [4, 6, 8],
-    "reg_alpha": [0.0, 0.1, 0.5, 1.0],
-    "reg_lambda": [1.0, 2.0, 5.0],
-    "min_child_weight": [1, 3, 5, 10],
+    "learning_rate": [0.03, 0.05, 0.1],
+    "max_depth": [4, 6],
+    "reg_alpha": [0.0, 0.5],
+    "reg_lambda": [1.0, 3.0],
 }
 
 LIGHTGBM_GRID = {
-    "learning_rate": [0.01, 0.03, 0.05, 0.1],
-    "max_depth": [4, 6, 8],
-    "reg_alpha": [0.0, 0.1, 0.5, 1.0],
-    "reg_lambda": [1.0, 2.0, 5.0],
-    "min_child_weight": [1, 3, 5, 10],
+    "learning_rate": [0.03, 0.05, 0.1],
+    "max_depth": [4, 6],
+    "reg_alpha": [0.0, 0.5],
+    "reg_lambda": [1.0, 3.0],
 }
 
 CATBOOST_GRID = {
-    "learning_rate": [0.01, 0.03, 0.05, 0.1],
-    "depth": [4, 6, 8],
-    "l2_leaf_reg": [1.0, 3.0, 5.0, 10.0],
+    "learning_rate": [0.03, 0.05, 0.1],
+    "depth": [4, 6],
+    "l2_leaf_reg": [1.0, 5.0],
 }
+
+ALL_MODELS = ["xgboost", "lightgbm", "catboost"]
 
 
 def _generate_combinations(grid):
@@ -108,8 +114,8 @@ def _train_and_score(model_type, params, X_train, y_train, X_val, y_val):
     return float(np.mean(y_pred == y_val))
 
 
-def _cv_score(model_type, params, X, y, n_folds=3):
-    """Cross-validation stratificada, retorna media da accuracy."""
+def _cv_score(model_type, params, X, y, n_folds=2):
+    """Cross-validation stratificada (2-fold para rapidez)."""
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=RANDOM_SEED)
     scores = []
     for train_idx, val_idx in skf.split(X, y):
@@ -123,7 +129,7 @@ def _cv_score(model_type, params, X, y, n_folds=3):
 
 
 def run_grid_search(model_type, X, y):
-    """Executa grid search."""
+    """Executa grid search reduzido."""
     if model_type == "xgboost":
         grid = XGBOOST_GRID
     elif model_type == "lightgbm":
@@ -137,14 +143,13 @@ def run_grid_search(model_type, X, y):
     total = len(combos)
     print(f"\n{'='*60}")
     print(f"  Grid Search: {model_type} | {LOCAL_EPOCHS} estimators")
-    print(f"  {total} combinacoes | {len(X)} amostras | 3-fold CV")
+    print(f"  {total} combinacoes | {len(X):,} amostras | 2-fold CV")
     print(f"{'='*60}")
 
     best_score = -1
     best_params = None
 
     for i, params in enumerate(combos):
-        # Injeta n_estimators
         if model_type in ("xgboost", "lightgbm"):
             params["n_estimators"] = LOCAL_EPOCHS
         elif model_type == "catboost":
@@ -161,7 +166,7 @@ def run_grid_search(model_type, X, y):
             best_params = {k: v for k, v in params.items()
                           if k not in ("n_estimators", "iterations")}
             print(f"  [{i+1}/{total}] Acc={score:.4f} *** NOVO MELHOR *** {best_params}")
-        elif (i + 1) % 50 == 0:
+        elif (i + 1) % 10 == 0:
             print(f"  [{i+1}/{total}] Progresso... (melhor ate agora: {best_score:.4f})")
 
         sys.stdout.flush()
@@ -171,60 +176,101 @@ def run_grid_search(model_type, X, y):
     return best_params, best_score
 
 
+def run_grid_search_all_models(X, y, output_dir=None):
+    """Executa grid search para todos os modelos e retorna dict com resultados."""
+    results = {}
+
+    for model_type in ALL_MODELS:
+        t0 = time.time()
+        best_params, best_score = run_grid_search(model_type, X, y)
+        elapsed = time.time() - t0
+
+        results[model_type] = {
+            "params": best_params,
+            "score": best_score,
+            "time": elapsed,
+        }
+
+        print(f"  [{model_type}] Concluido em {elapsed:.1f}s — Acc={best_score:.4f}")
+
+        if output_dir:
+            out_path = os.path.join(output_dir, f"tuned_{model_type}.json")
+            with open(out_path, "w") as f:
+                json.dump(best_params, f, indent=2)
+            print(f"  [{model_type}] Salvo em: {out_path}")
+
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Grid search de hiperparametros para FL"
+        description="Grid search rapido de hiperparametros para FL"
     )
     parser.add_argument("--dataset", type=str, required=True,
                         choices=["higgs", "higgs_full", "epsilon", "avazu"])
-    parser.add_argument("--model", type=str, required=True,
-                        choices=["xgboost", "lightgbm", "catboost"])
-    parser.add_argument("--sample-size", type=int, default=50000,
-                        help="Amostras para grid search (default: 50000)")
+    parser.add_argument("--model", type=str, default=None,
+                        choices=ALL_MODELS,
+                        help="Modelo (omita para --all-models)")
+    parser.add_argument("--all-models", action="store_true",
+                        help="Roda grid search para todos os modelos")
+    parser.add_argument("--sample-size", type=int, default=30000,
+                        help="Amostras para grid search (default: 30000)")
     parser.add_argument("--output", type=str, default=None,
-                        help="Arquivo JSON para salvar resultados")
+                        help="Arquivo JSON para salvar resultados (modo --model)")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Diretorio para salvar JSONs (modo --all-models)")
     args = parser.parse_args()
+
+    if not args.model and not args.all_models:
+        parser.error("Especifique --model ou --all-models")
 
     print(f"\nCarregando dataset {args.dataset}...")
     X_train, y_train, X_test, y_test = DatasetRegistry.load(
         args.dataset, role="client", client_id=0, num_clients=1,
     )
 
-    # Subsample se necessario
     if args.sample_size < len(X_train):
         rng = np.random.RandomState(RANDOM_SEED)
         idx = rng.choice(len(X_train), size=args.sample_size, replace=False)
         X_train = X_train[idx]
         y_train = y_train[idx]
-        print(f"Subamostrado para {args.sample_size} amostras")
+        print(f"Subamostrado para {args.sample_size:,} amostras")
 
-    print(f"Dataset: {X_train.shape[0]} treino, {X_test.shape[0]} teste, "
+    print(f"Dataset: {X_train.shape[0]:,} treino, {X_test.shape[0]:,} teste, "
           f"{X_train.shape[1]} features")
-    print(f"Classe 0: {(y_train == 0).sum()} ({(y_train == 0).mean()*100:.1f}%) | "
-          f"Classe 1: {(y_train == 1).sum()} ({(y_train == 1).mean()*100:.1f}%)")
+    print(f"Classe 0: {(y_train == 0).sum():,} ({(y_train == 0).mean()*100:.1f}%) | "
+          f"Classe 1: {(y_train == 1).sum():,} ({(y_train == 1).mean()*100:.1f}%)")
 
-    t0 = time.time()
-    best_params, best_score = run_grid_search(args.model, X_train, y_train)
-    elapsed = time.time() - t0
+    t_total = time.time()
 
-    print(f"\n{'='*60}")
-    print(f"  RESULTADO FINAL — {args.model} | {args.dataset}")
-    print(f"  Tempo total: {elapsed:.1f}s")
-    print(f"  Acc: {best_score:.4f}")
-    print(f"  Params: {best_params}")
-    print(f"{'='*60}")
+    if args.all_models:
+        results = run_grid_search_all_models(
+            X_train, y_train, output_dir=args.output_dir,
+        )
+        elapsed = time.time() - t_total
 
-    if args.output:
-        with open(args.output, "w") as f:
-            json.dump(best_params, f, indent=2)
-        print(f"\n  Salvo em: {args.output}")
-        print(f"  Para usar no config.py:")
-        print(f'    import json')
-        print(f'    TUNED_PARAMS = json.load(open("{args.output}"))')
+        print(f"\n{'='*60}")
+        print(f"  RESULTADO FINAL — Todos os modelos | {args.dataset}")
+        print(f"  Tempo total: {elapsed:.1f}s")
+        for m, r in results.items():
+            print(f"    {m}: Acc={r['score']:.4f} ({r['time']:.1f}s)")
+            print(f"      Params: {r['params']}")
+        print(f"{'='*60}")
     else:
-        print(f"\n  Para salvar em JSON, use: --output tuned_params.json")
-        print(f"\n  Ou copie para config.py:")
-        print(f"    TUNED_PARAMS = {json.dumps(best_params, indent=2)}")
+        best_params, best_score = run_grid_search(args.model, X_train, y_train)
+        elapsed = time.time() - t_total
+
+        print(f"\n{'='*60}")
+        print(f"  RESULTADO FINAL — {args.model} | {args.dataset}")
+        print(f"  Tempo total: {elapsed:.1f}s")
+        print(f"  Acc: {best_score:.4f}")
+        print(f"  Params: {best_params}")
+        print(f"{'='*60}")
+
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(best_params, f, indent=2)
+            print(f"\n  Salvo em: {args.output}")
 
 
 if __name__ == "__main__":

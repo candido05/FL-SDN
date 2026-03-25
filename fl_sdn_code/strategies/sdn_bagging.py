@@ -140,7 +140,7 @@ class SDNBagging(BaseStrategy):
             eligible = {cid: 0.5 for cid in all_client_ids}
             excluded_ids = []
 
-        # 4. Seleciona os melhores dentre os elegiveis restantes
+        # 5. Seleciona os melhores dentre os elegiveis restantes
         sorted_clients = sorted(eligible.items(), key=lambda x: x[1], reverse=True)
         selected_ids = [cid for cid, _ in sorted_clients]
 

@@ -3,8 +3,8 @@ Gera graficos comparativos com_sdn vs sem_sdn a partir dos CSVs produzidos
 pelo servidor FL.
 
 Uso:
-    python plot_resultados.py --com com_sdn_resultados.csv --sem sem_sdn_resultados.csv
-    python plot_resultados.py --com output/<run>/com_sdn_resultados.csv --sem output/<run>/sem_sdn_resultados.csv
+    python tools/plot_resultados.py --com com_sdn_resultados.csv --sem sem_sdn_resultados.csv
+    python tools/plot_resultados.py --com output/<run>/com_sdn_resultados.csv --sem output/<run>/sem_sdn_resultados.csv
 
 Saida (graficos de linha):
     01_accuracy_f1_tempo.png         — Accuracy e F1 x Tempo
@@ -54,7 +54,6 @@ def parse_args():
 
 _REQUIRED_COLS = ["round", "elapsed_sec", "accuracy", "f1", "auc"]
 
-# Cores e estilos padrao
 _STYLE_COM = dict(color="blue", linewidth=2, marker="o", markersize=4, linestyle="-", label="Com SDN")
 _STYLE_SEM = dict(color="red",  linewidth=2, marker="o", markersize=4, linestyle="--", label="Sem SDN")
 
@@ -77,7 +76,6 @@ def _has(com, sem, col):
 
 
 def _has_any(com, sem, col):
-    """Retorna True se pelo menos um dos DataFrames tem a coluna com valores > 0."""
     for df in [com, sem]:
         if col in df.columns and df[col].abs().sum() > 0:
             return True
@@ -101,7 +99,6 @@ def tempo_para_atingir(df, frac, metric="accuracy"):
 
 
 def _line_plot(ax, com, sem, x_col, y_col, ylabel, title=None):
-    """Plot de linha padrao com/sem SDN."""
     ax.plot(sem[x_col], sem[y_col], **_STYLE_SEM)
     ax.plot(com[x_col], com[y_col], **_STYLE_COM)
     ax.set_xlabel("Round" if x_col == "round" else "Tempo (s)", fontsize=11)
@@ -209,7 +206,7 @@ def plot_metricas_calibracao(com, sem, out_dir):
 
 
 # ---------------------------------------------------------------------------
-# 5. Duracao por round (linha)
+# 5. Duracao por round
 # ---------------------------------------------------------------------------
 
 def plot_duracao_round(com, sem, out_dir):
@@ -231,7 +228,7 @@ def plot_duracao_round(com, sem, out_dir):
 
 
 # ---------------------------------------------------------------------------
-# 6. Consumo CPU e RAM x Round
+# 6. CPU e RAM x Round
 # ---------------------------------------------------------------------------
 
 def plot_consumo_cpu_ram(com, sem, out_dir):
@@ -254,7 +251,6 @@ def plot_consumo_cpu_ram(com, sem, out_dir):
         axes = [axes]
 
     for ax, (col, ylabel, title) in zip(axes, plots):
-        # Plota com valor 0 para colunas ausentes
         sem_vals = sem[col] if col in sem.columns else pd.Series([0] * len(sem))
         com_vals = com[col] if col in com.columns else pd.Series([0] * len(com))
         ax.plot(sem["round"], sem_vals, **_STYLE_SEM)
@@ -265,7 +261,6 @@ def plot_consumo_cpu_ram(com, sem, out_dir):
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
-    # Se tem RAM, adicionar pico como linha pontilhada
     if has_ram and _has_any(com, sem, "ram_peak_mb_max"):
         ax_ram = axes[-1]
         if "ram_peak_mb_max" in com.columns:
@@ -282,7 +277,7 @@ def plot_consumo_cpu_ram(com, sem, out_dir):
 
 
 # ---------------------------------------------------------------------------
-# 7. Rede: Bandwidth e Latencia x Round
+# 7. Bandwidth e Latencia x Round
 # ---------------------------------------------------------------------------
 
 def plot_rede_bw_latency(com, sem, out_dir):
@@ -319,7 +314,7 @@ def plot_rede_bw_latency(com, sem, out_dir):
 
 
 # ---------------------------------------------------------------------------
-# 8. Rede: Packet Loss, Jitter, Efficiency Score x Round
+# 8. Packet Loss, Jitter, Efficiency Score x Round
 # ---------------------------------------------------------------------------
 
 def plot_rede_loss_jitter_score(com, sem, out_dir):
@@ -377,7 +372,7 @@ def plot_modelo_tamanho(com, sem, out_dir):
 
 
 # ---------------------------------------------------------------------------
-# Texto — reducao percentual de tempo + resumo de recursos
+# Texto — reducao percentual de tempo
 # ---------------------------------------------------------------------------
 
 def calcular_reducao(com, sem, frac, out_dir):
@@ -423,7 +418,6 @@ def calcular_reducao(com, sem, frac, out_dir):
                 f"{label:15s}Sem={sem[col].iloc[-1]:.4f}  Com={com[col].iloc[-1]:.4f}"
             )
 
-    # Recursos
     resource_cols = [
         ("cpu_percent_avg",    "CPU (%)"),
         ("ram_mb_avg",         "RAM (MB)"),
@@ -440,7 +434,6 @@ def calcular_reducao(com, sem, frac, out_dir):
                 com_val = com[col].mean() if col in com.columns else 0
                 linhas.append(f"{label:18s}Sem={sem_val:.2f}  Com={com_val:.2f}")
 
-    # Rede
     net_cols = [
         ("bandwidth_mbps_avg",    "Bandwidth (Mbps)"),
         ("latency_ms_avg",        "Latencia (ms)"),
@@ -485,22 +478,16 @@ def main():
     print(f"Saida: {out_dir}")
     print(f"\nGerando graficos...")
 
-    # Metricas de modelo (FL)
     plot_accuracy_f1_tempo(com, sem, out_dir)
     plot_metricas_classificacao(com, sem, out_dir)
     plot_auc_pr_auc(com, sem, out_dir)
     plot_metricas_calibracao(com, sem, out_dir)
     plot_duracao_round(com, sem, out_dir)
-
-    # Consumo de recursos
     plot_consumo_cpu_ram(com, sem, out_dir)
     plot_modelo_tamanho(com, sem, out_dir)
-
-    # Metricas de rede SDN
     plot_rede_bw_latency(com, sem, out_dir)
     plot_rede_loss_jitter_score(com, sem, out_dir)
 
-    # Resumo textual
     print()
     calcular_reducao(com, sem, args.threshold_frac, out_dir)
 

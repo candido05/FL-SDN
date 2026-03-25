@@ -6,7 +6,7 @@ Pre-processado por prepare_datasets.py → data/avazu/avazu_X.npy
 
 Caracteristicas:
   - ~40M amostras no dataset original
-  - Features categoricas convertidas via Feature Hashing (256 dimensoes)
+  - Features categoricas convertidas via Feature Hashing (1024 dimensoes, data-independent)
   - Label: click (0 = nao clicou, 1 = clicou)
   - Dataset altamente desbalanceado (~17% positivos)
   - Benchmark classico para CTR e classificacao em larga escala
@@ -34,7 +34,7 @@ def load(role: str, client_id: int = 0, **kwargs):
     """
     if not is_prepared("avazu"):
         print("ERRO: Dataset Avazu nao preparado.")
-        print("  Execute: python prepare_datasets.py --dataset avazu")
+        print("  Execute: python tools/prepare_datasets.py --dataset avazu")
         sys.exit(1)
 
     x_path, y_path = npy_paths("avazu")
