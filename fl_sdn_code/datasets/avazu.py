@@ -18,7 +18,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 
 from config import TEST_SIZE, RANDOM_SEED, NUM_CLIENTS
-from datasets.registry import DatasetRegistry
+from datasets.registry import DatasetRegistry, stratified_partition
 from datasets.paths import npy_paths, is_prepared
 
 
@@ -62,7 +62,7 @@ def load(role: str, client_id: int = 0, **kwargs):
 
     # role == "client"
     num_clients = kwargs.get("num_clients", NUM_CLIENTS)
-    indices = np.array_split(np.arange(len(y_train)), num_clients)
+    indices = stratified_partition(y_train, num_clients, RANDOM_SEED)
     my_idx = indices[client_id]
     X_client = X_train[my_idx]
     y_client = y_train[my_idx]

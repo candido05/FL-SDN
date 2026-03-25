@@ -12,7 +12,7 @@ from flwr.server.client_manager import ClientManager
 
 from config import (
     NUM_ROUNDS, LOCAL_EPOCHS,
-    LOCAL_EPOCHS_BY_CAT, CLIENT_CATEGORIES,
+    CLIENT_CATEGORIES,
     SDN_ADAPTIVE_EPOCHS,
     HEALTH_SCORE_ENABLED, HEALTH_SCORE_PROFILE,
     HEALTH_SCORE_CUSTOM_WEIGHTS, HEALTH_SCORE_MAX_EXCLUDE,
@@ -41,6 +41,7 @@ class SDNBagging(BaseStrategy):
     def __init__(self, num_clients: int, X_test: np.ndarray, y_test: np.ndarray):
         super().__init__(num_clients, X_test, y_test)
         self.client_models: Dict[int, object] = {}
+        self.client_weights: Dict[int, float] = {}
         self.best_model = None
         self._sdn_logger = None
         self._last_net_metrics: Dict = {}  # reutilizado no aggregate_fit (evita double-fetch)
@@ -68,8 +69,14 @@ class SDNBagging(BaseStrategy):
     def _predict(self, X_test):
         if not self.client_models:
             return None, None
-        preds = [m.predict_proba(X_test)[:, 1] for m in self.client_models.values()]
-        y_prob = np.mean(preds, axis=0)
+        preds = []
+        weights = []
+        for cid, model in self.client_models.items():
+            preds.append(model.predict_proba(X_test)[:, 1])
+            weights.append(self.client_weights.get(cid, 1.0))
+        weights = np.array(weights)
+        weights = weights / weights.sum()
+        y_prob = np.average(preds, axis=0, weights=weights)
         y_pred = (y_prob >= 0.5).astype(int)
         return y_prob, y_pred
 
@@ -159,18 +166,16 @@ class SDNBagging(BaseStrategy):
         adapted_epochs = {}
         for cid in selected_ids:
             cat = CLIENT_CATEGORIES.get(cid, "cat1")
-            base_epochs = LOCAL_EPOCHS_BY_CAT.get(cat, LOCAL_EPOCHS)
             if SDN_ADAPTIVE_EPOCHS:
                 score = eligible.get(cid, 0.5)
                 adapted = adapt_local_epochs(
-                    base_epochs, net_metrics.get(cid, {}), score,
+                    LOCAL_EPOCHS, net_metrics.get(cid, {}), score,
                 )
                 adapted_epochs[cid] = adapted
-                print(f"  [SDN] Cliente {cid} ({cat}): {base_epochs} → {adapted} epocas")
+                print(f"  [SDN] Cliente {cid} ({cat}): {LOCAL_EPOCHS} → {adapted} epocas")
             else:
-                # Nao adapta: cliente usara suas proprias epocas por categoria
                 adapted_epochs[cid] = 0
-                print(f"  [SDN] Cliente {cid} ({cat}): {base_epochs} epocas (definido pelo cliente)")
+                print(f"  [SDN] Cliente {cid} ({cat}): {LOCAL_EPOCHS} epocas")
 
         # 6. Agrega metricas de rede para o CSV principal
         self._last_network_metrics = self._aggregate_network_metrics(
@@ -218,6 +223,7 @@ class SDNBagging(BaseStrategy):
         print(f"\n  [SDN-Bagging] Agregando modelos de {len(results)} clientes...")
 
         self.client_models = {}
+        self.client_weights = {}
         best_acc = -1
         best_cid = -1
 
@@ -227,20 +233,31 @@ class SDNBagging(BaseStrategy):
             self.client_models[cid] = model
 
             t = fit_res.metrics.get("training_time", 0)
-            acc = fit_res.metrics.get("accuracy", 0)
+            client_acc = fit_res.metrics.get("accuracy", 0)
             f1 = fit_res.metrics.get("f1", 0)
             sz = fit_res.metrics.get("model_size_kb", 0)
             ep = fit_res.metrics.get("local_epochs", 0)
-            print(f"    Cliente {cid}: Acc={acc:.4f} F1={f1:.4f} "
+            print(f"    Cliente {cid}: Acc(local)={client_acc:.4f} F1={f1:.4f} "
                   f"Tempo={t:.1f}s Modelo={sz:.1f}KB Epocas={ep}")
 
-            if acc > best_acc:
-                best_acc = acc
+        # Avaliacao server-side: seleciona best_model e calcula pesos do ensemble
+        print(f"  [SDN-Bagging] Avaliando modelos no test set do servidor...")
+        for cid, model in self.client_models.items():
+            y_prob = model.predict_proba(self.X_test)[:, 1]
+            y_pred = (y_prob >= 0.5).astype(int)
+            server_acc = float(np.mean(y_pred == self.y_test))
+            self.client_weights[cid] = server_acc
+
+            print(f"    Cliente {cid}: Acc(server)={server_acc:.4f}")
+
+            if server_acc > best_acc:
+                best_acc = server_acc
                 best_cid = cid
 
         if best_cid >= 0:
             self.best_model = self.client_models[best_cid]
-            print(f"  [SDN-Bagging] Melhor modelo: Cliente {best_cid} (Acc={best_acc:.4f})")
+            print(f"  [SDN-Bagging] Melhor modelo (server-side): "
+                  f"Cliente {best_cid} (Acc={best_acc:.4f})")
 
         if failures:
             print(f"  [SDN-Bagging] AVISO: {len(failures)} falha(s)")

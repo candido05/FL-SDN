@@ -3,17 +3,32 @@ Factory Pattern para criacao e treino de modelos.
 
 Encapsula a logica de instanciacao e warm-start de XGBoost, LightGBM e CatBoost,
 substituindo o bloco if/elif que existia em client.py.
+
+Mitigacoes de overfitting implementadas:
+  - Tree cap: limita total de arvores acumuladas via warm start (MAX_TOTAL_TREES)
+  - Early stopping: para treinamento se validacao nao melhora (EARLY_STOPPING_ROUNDS)
+  - Validation split: reserva parcela do treino para monitorar generalizacao
+  - Extra params: permite injetar hiperparametros tunados (via grid_search.py)
 """
 
 import sys
 
+import numpy as np
 import xgboost as xgb
 import lightgbm as lgb
 from catboost import CatBoostClassifier
+from sklearn.model_selection import train_test_split
 
-from config import XGBOOST_PARAMS, LIGHTGBM_PARAMS, CATBOOST_PARAMS
+from config import (
+    XGBOOST_PARAMS, LIGHTGBM_PARAMS, CATBOOST_PARAMS,
+    RANDOM_SEED, MAX_TOTAL_TREES, EARLY_STOPPING_ROUNDS, VALIDATION_SPLIT,
+)
 from models.callbacks import XGBoostProgressCallback, lgb_progress_callback
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _count_trees(model) -> int:
     """Conta arvores em um modelo XGBoost existente."""
@@ -23,6 +38,62 @@ def _count_trees(model) -> int:
     except Exception:
         return 0
 
+
+def _count_trees_lgb(model) -> int:
+    """Conta arvores em um modelo LightGBM existente."""
+    try:
+        return model.booster_.num_trees()
+    except Exception:
+        try:
+            return model.n_estimators_
+        except Exception:
+            return 0
+
+
+def _count_trees_catboost(model) -> int:
+    """Conta arvores em um modelo CatBoost existente."""
+    try:
+        return model.tree_count_
+    except Exception:
+        return 0
+
+
+def _apply_tree_cap(n_new, n_existing, label=""):
+    """Aplica o limite de arvores totais, retornando n_new ajustado."""
+    total = n_existing + n_new
+    if total > MAX_TOTAL_TREES:
+        capped = max(MAX_TOTAL_TREES - n_existing, 0)
+        if capped == 0:
+            print(f"    [{label}] Tree cap atingido: {n_existing} arvores existentes "
+                  f">= {MAX_TOTAL_TREES}. Retornando modelo existente.")
+        else:
+            print(f"    [{label}] Tree cap: {n_new} → {capped} novas arvores "
+                  f"(total {n_existing}+{capped}={n_existing+capped}, "
+                  f"limite={MAX_TOTAL_TREES})")
+        return capped
+    return n_new
+
+
+def _make_val_split(X_train, y_train):
+    """
+    Separa uma parcela do treino para validacao (early stopping).
+    Retorna (X_fit, X_val, y_fit, y_val).
+    Se o dataset for muito pequeno (<50 amostras), nao faz split.
+    """
+    if len(X_train) < 50 or VALIDATION_SPLIT <= 0:
+        return X_train, None, y_train, None
+
+    return train_test_split(
+        X_train, y_train,
+        test_size=VALIDATION_SPLIT,
+        random_state=RANDOM_SEED,
+        stratify=y_train,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
 
 class ModelFactory:
     """
@@ -45,7 +116,8 @@ class ModelFactory:
 
     @classmethod
     def train(cls, model_type: str, X_train, y_train, client_id: int,
-              server_round: int, local_epochs: int, warm_start_model=None):
+              server_round: int, local_epochs: int, warm_start_model=None,
+              extra_params=None):
         """Cria e treina modelo do tipo especificado."""
         builder = cls._BUILDERS.get(model_type)
         if builder is None:
@@ -54,34 +126,61 @@ class ModelFactory:
                 f"Disponiveis: {list(cls._BUILDERS.keys())}"
             )
         return builder(X_train, y_train, client_id, server_round,
-                        local_epochs, warm_start_model)
+                        local_epochs, warm_start_model, extra_params)
 
+
+# ---------------------------------------------------------------------------
+# Builders
+# ---------------------------------------------------------------------------
 
 @ModelFactory.register("xgboost")
 def _train_xgboost(X_train, y_train, client_id, server_round,
-                    local_epochs, warm_start_model):
+                    local_epochs, warm_start_model, extra_params):
     # Warm start: reduz n_estimators gradualmente para evitar overfitting
-    # O modelo ja tem arvores do round anterior — precisa de menos refinamento
     if warm_start_model is not None:
         n_existing = _count_trees(warm_start_model)
-        # Diminui 20% por round, minimo 10% das epocas base
         reduction = max(0.1, 1.0 - (server_round - 1) * 0.2)
         n_new = max(int(local_epochs * reduction), 10)
+        # Tree cap
+        n_new = _apply_tree_cap(n_new, n_existing, "XGBoost")
+        if n_new == 0:
+            return warm_start_model
         print(f"    [XGBoost] Warm start: {n_existing} arvores existentes + "
               f"{n_new} novas (reducao {reduction:.0%} do base {local_epochs})")
     else:
         n_new = local_epochs
 
     params = {**XGBOOST_PARAMS, "n_estimators": n_new}
+    if extra_params:
+        params.update(extra_params)
+
+    # Validation split para early stopping
+    X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)
+
+    # early_stopping_rounds vai no construtor (XGBoost >= 2.0)
+    if X_val is not None:
+        params["early_stopping_rounds"] = EARLY_STOPPING_ROUNDS
+
     cb = XGBoostProgressCallback(client_id, server_round, n_new)
     model = xgb.XGBClassifier(**params, callbacks=[cb])
-    eval_set = [(X_train, y_train)]
+
+    fit_kwargs = {"verbose": False}
+    if X_val is not None:
+        fit_kwargs["eval_set"] = [(X_val, y_val)]
+    else:
+        fit_kwargs["eval_set"] = [(X_fit, y_fit)]
 
     if warm_start_model is not None:
-        model.fit(X_train, y_train, xgb_model=warm_start_model.get_booster(),
-                  eval_set=eval_set, verbose=False)
+        model.fit(X_fit, y_fit, xgb_model=warm_start_model.get_booster(),
+                  **fit_kwargs)
     else:
-        model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+        model.fit(X_fit, y_fit, **fit_kwargs)
+
+    # Log early stopping se ocorreu
+    if X_val is not None and hasattr(model, 'best_iteration'):
+        actual = model.best_iteration + 1
+        if actual < n_new:
+            print(f"    [XGBoost] Early stopping na iteracao {actual}/{n_new}")
 
     # Limpar callbacks para que pickle nao tente serializa-los
     model.set_params(callbacks=None)
@@ -92,52 +191,103 @@ def _train_xgboost(X_train, y_train, client_id, server_round,
 
 @ModelFactory.register("lightgbm")
 def _train_lightgbm(X_train, y_train, client_id, server_round,
-                     local_epochs, warm_start_model):
+                     local_epochs, warm_start_model, extra_params):
     if warm_start_model is not None:
+        n_existing = _count_trees_lgb(warm_start_model)
         reduction = max(0.1, 1.0 - (server_round - 1) * 0.2)
         n_new = max(int(local_epochs * reduction), 10)
+        # Tree cap
+        n_new = _apply_tree_cap(n_new, n_existing, "LightGBM")
+        if n_new == 0:
+            return warm_start_model
         print(f"    [LightGBM] Warm start: {n_new} novas iteracoes "
               f"(reducao {reduction:.0%} do base {local_epochs})")
     else:
         n_new = local_epochs
 
     params = {**LIGHTGBM_PARAMS, "n_estimators": n_new}
-    cb = lgb_progress_callback(client_id, server_round, n_new)
+    if extra_params:
+        params.update(extra_params)
+
+    # Validation split para early stopping
+    X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)
+
+    progress_cb = lgb_progress_callback(client_id, server_round, n_new)
+    callbacks = [progress_cb]
+    if X_val is not None:
+        callbacks.append(lgb.early_stopping(EARLY_STOPPING_ROUNDS))
+
     model = lgb.LGBMClassifier(**params)
 
-    if warm_start_model is not None:
-        model.fit(X_train, y_train, init_model=warm_start_model,
-                  eval_set=[(X_train, y_train)], callbacks=[cb])
+    if X_val is not None:
+        eval_set = [(X_val, y_val)]
     else:
-        model.fit(X_train, y_train,
-                  eval_set=[(X_train, y_train)], callbacks=[cb])
+        eval_set = [(X_fit, y_fit)]
+
+    if warm_start_model is not None:
+        model.fit(X_fit, y_fit, init_model=warm_start_model,
+                  eval_set=eval_set, callbacks=callbacks)
+    else:
+        model.fit(X_fit, y_fit,
+                  eval_set=eval_set, callbacks=callbacks)
+
+    # Log early stopping se ocorreu
+    if X_val is not None and hasattr(model, 'best_iteration_'):
+        actual = model.best_iteration_
+        if actual > 0 and actual < n_new:
+            print(f"    [LightGBM] Early stopping na iteracao {actual}/{n_new}")
+
     return model
 
 
 @ModelFactory.register("catboost")
 def _train_catboost(X_train, y_train, client_id, server_round,
-                    local_epochs, warm_start_model):
+                    local_epochs, warm_start_model, extra_params):
     if warm_start_model is not None:
+        n_existing = _count_trees_catboost(warm_start_model)
         reduction = max(0.1, 1.0 - (server_round - 1) * 0.2)
         n_new = max(int(local_epochs * reduction), 10)
+        # Tree cap
+        n_new = _apply_tree_cap(n_new, n_existing, "CatBoost")
+        if n_new == 0:
+            return warm_start_model
         print(f"    [CatBoost] Warm start: {n_new} novas iteracoes "
               f"(reducao {reduction:.0%} do base {local_epochs})")
     else:
         n_new = local_epochs
 
     params = {**CATBOOST_PARAMS, "iterations": n_new, "verbose": 0}
+    if extra_params:
+        params.update(extra_params)
+
+    # Validation split para early stopping
+    X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)
+
+    if X_val is not None:
+        params["early_stopping_rounds"] = EARLY_STOPPING_ROUNDS
+
     model = CatBoostClassifier(**params)
 
     print(f"    [Cliente {client_id}] Round {server_round} | "
           f"Treinando CatBoost ({n_new} iteracoes)...")
     sys.stdout.flush()
 
+    fit_kwargs = {"verbose": False}
+    if X_val is not None:
+        fit_kwargs["eval_set"] = (X_val, y_val)
+
     if warm_start_model is not None:
-        model.fit(X_train, y_train, init_model=warm_start_model, verbose=False)
+        model.fit(X_fit, y_fit, init_model=warm_start_model, **fit_kwargs)
     else:
-        model.fit(X_train, y_train, verbose=False)
+        model.fit(X_fit, y_fit, **fit_kwargs)
+
+    # Log early stopping se ocorreu
+    if X_val is not None:
+        actual = model.tree_count_
+        if actual < n_new:
+            print(f"    [CatBoost] Early stopping na iteracao {actual}/{n_new}")
 
     print(f"    [Cliente {client_id}] Round {server_round} | "
-          f"CatBoost {n_new}/{n_new} iteracoes concluidas")
+          f"CatBoost {model.tree_count_}/{n_new} iteracoes concluidas")
     sys.stdout.flush()
     return model

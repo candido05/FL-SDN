@@ -4,6 +4,33 @@ Registry Pattern para datasets.
 Permite adicionar novos datasets sem modificar codigo existente.
 """
 
+import numpy as np
+
+
+def stratified_partition(y, num_parts, seed):
+    """
+    Particiona indices de forma estratificada, garantindo que cada parte
+    tenha a mesma distribuicao de classes.
+
+    Args:
+        y: Array de labels.
+        num_parts: Numero de particoes (= num_clients).
+        seed: Seed para reproducibilidade.
+
+    Returns:
+        Lista de arrays de indices, um por particao.
+    """
+    rng = np.random.RandomState(seed)
+    classes = np.unique(y)
+    parts = [[] for _ in range(num_parts)]
+    for cls in classes:
+        cls_indices = np.where(y == cls)[0]
+        rng.shuffle(cls_indices)
+        splits = np.array_split(cls_indices, num_parts)
+        for i, split in enumerate(splits):
+            parts[i].append(split)
+    return [np.concatenate(p) for p in parts]
+
 
 class DatasetRegistry:
     """Registry central de datasets disponveis."""

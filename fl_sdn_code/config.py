@@ -20,22 +20,16 @@ SDN_ORCHESTRATOR_PORT = "8000"
 
 # Mapeamento client_id → IP na rede GNS3
 SDN_CLIENT_IPS = {
-    0: "172.16.1.10",   # FL-Node-1 (cat1)
-    1: "172.16.1.16",   # FL-Node-5 (cat1)
-    2: "172.16.1.11",   # FL-Node-2 (cat2)
-    3: "172.16.1.14",   # FL-Node-4 (cat2)
-    4: "172.16.1.13",   # FL-Node-3 (cat3)
-    5: "172.16.1.17",   # FL-Node-6 (cat3)
+    0: "172.16.1.10",   # FL-Node-1
+    1: "172.16.1.16",   # FL-Node-5
+    2: "172.16.1.11",   # FL-Node-2
+    3: "172.16.1.14",   # FL-Node-4
+    4: "172.16.1.13",   # FL-Node-3
+    5: "172.16.1.17",   # FL-Node-6
 }
 
-# Epocas locais por categoria (simula diferenca de capacidade computacional)
-LOCAL_EPOCHS_BY_CAT = {
-    "cat1": 50,   # low — treina menos, modelo menor
-    "cat2": 100,  # medium
-    "cat3": 150,  # high — modelo maior, mais bytes na rede
-}
-
-# Mapeamento client_id → categoria
+# Categorias de clientes (usadas para QoS/priorizacao de trafego SDN)
+# Todos treinam com o mesmo numero de epocas (LOCAL_EPOCHS)
 CLIENT_CATEGORIES = {
     0: "cat1",  # FL-Node-1
     1: "cat1",  # FL-Node-5
@@ -107,6 +101,22 @@ CATBOOST_PARAMS = {
 }
 
 # ---------------------------------------------------------------------------
+# Controle de Overfitting — Tree Cap e Early Stopping
+# ---------------------------------------------------------------------------
+MAX_TOTAL_TREES = 500              # Maximo de arvores acumuladas com warm start
+                                   # Evita crescimento ilimitado ao longo dos rounds
+EARLY_STOPPING_ROUNDS = 10         # Parar se validacao nao melhorar em N rounds
+VALIDATION_SPLIT = 0.15            # Fracao do treino local reservada para validacao
+                                   # Usada para early stopping (nao treina nesta parcela)
+
+# Hiperparametros tunados (preenchido pelo grid_search.py)
+# Se None, usa os parametros base (XGBOOST_PARAMS, etc.)
+# Formato: {"learning_rate": 0.05, "max_depth": 4, ...}
+TUNED_PARAMS = None
+# Para carregar de arquivo JSON gerado pelo grid_search.py:
+# import json; TUNED_PARAMS = json.load(open("tuned_params.json"))
+
+# ---------------------------------------------------------------------------
 # Integracao SDN — Limiares e scoring
 # ---------------------------------------------------------------------------
 
@@ -117,7 +127,7 @@ SDN_MOCK_MODE = False
 
 # Adaptacao de epocas locais baseada em rede
 # True = ajusta epocas conforme efficiency_score do cliente
-# False = usa epocas fixas por categoria (comportamento original)
+# False = todos usam LOCAL_EPOCHS (uniforme)
 # ATENCAO: manter False nos experimentos com/sem SDN para comparacao justa
 SDN_ADAPTIVE_EPOCHS = False
 #SDN_ADAPTIVE_EPOCHS = True   # descomentar se quiser adaptacao por rede

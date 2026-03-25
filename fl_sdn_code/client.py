@@ -5,9 +5,9 @@ Uso:
     python client.py --client-id 0 --model xgboost
     python client.py --client-id 1 --model lightgbm
 
-O numero de epocas locais e determinado pela categoria do cliente
-(CLIENT_CATEGORIES no config.py), refletindo a heterogeneidade de
-hardware (cat1=low, cat2=medium, cat3=high).
+Todos os clientes treinam com o mesmo numero de epocas locais (LOCAL_EPOCHS).
+As categorias (cat1/cat2/cat3) sao usadas apenas para priorizacao
+de trafego QoS nas estrategias SDN.
 """
 
 import argparse
@@ -39,7 +39,7 @@ logging.getLogger("grpc").setLevel(logging.ERROR)
 
 from config import (
     CLIENT_CONNECT_ADDRESS, LOCAL_EPOCHS, LOG_EVERY,
-    LOCAL_EPOCHS_BY_CAT, CLIENT_CATEGORIES,
+    CLIENT_CATEGORIES, TUNED_PARAMS,
 )
 from core.metrics import compute_all_metrics, print_metrics_table
 from core.resources import ResourceMonitor
@@ -70,6 +70,13 @@ class SimpleClient(fl.client.Client):
         self.X_test = X_test
         self.y_test = y_test
         self.model = None
+
+        # Hiperparametros tunados (via grid_search.py)
+        self.extra_params = None
+        if TUNED_PARAMS:
+            self.extra_params = TUNED_PARAMS
+            print(f"  [Cliente {client_id}] Usando params tunados: "
+                  f"{self.extra_params}")
 
     def fit(self, ins: FitIns) -> FitRes:
         config = ins.config
@@ -110,6 +117,7 @@ class SimpleClient(fl.client.Client):
         self.model = ModelFactory.train(
             self.model_type, self.X_train, self.y_train,
             self.client_id, server_round, round_epochs, warm_model,
+            extra_params=self.extra_params,
         )
         elapsed = time.time() - t0
 
@@ -193,7 +201,7 @@ def main():
     args = parser.parse_args()
 
     category = CLIENT_CATEGORIES.get(args.client_id, "cat1")
-    local_epochs = LOCAL_EPOCHS_BY_CAT.get(category, LOCAL_EPOCHS)
+    local_epochs = LOCAL_EPOCHS
 
     print(f"\n{'='*60}")
     print(f"  CLIENTE {args.client_id} - {args.model.upper()}")

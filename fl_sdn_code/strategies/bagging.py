@@ -16,11 +16,12 @@ from strategies.base import BaseStrategy
 
 
 class SimpleBagging(BaseStrategy):
-    """Todos os clientes treinam em paralelo; ensemble por media de probabilidades."""
+    """Todos os clientes treinam em paralelo; ensemble por media ponderada."""
 
     def __init__(self, num_clients: int, X_test: np.ndarray, y_test: np.ndarray):
         super().__init__(num_clients, X_test, y_test)
         self.client_models: Dict[int, object] = {}
+        self.client_weights: Dict[int, float] = {}
         self.best_model = None
 
     # -- Template Method hooks --
@@ -28,8 +29,14 @@ class SimpleBagging(BaseStrategy):
     def _predict(self, X_test):
         if not self.client_models:
             return None, None
-        preds = [m.predict_proba(X_test)[:, 1] for m in self.client_models.values()]
-        y_prob = np.mean(preds, axis=0)
+        preds = []
+        weights = []
+        for cid, model in self.client_models.items():
+            preds.append(model.predict_proba(X_test)[:, 1])
+            weights.append(self.client_weights.get(cid, 1.0))
+        weights = np.array(weights)
+        weights = weights / weights.sum()
+        y_prob = np.average(preds, axis=0, weights=weights)
         y_pred = (y_prob >= 0.5).astype(int)
         return y_prob, y_pred
 
@@ -83,6 +90,7 @@ class SimpleBagging(BaseStrategy):
         print(f"\n  [Servidor] Agregando modelos de {len(results)} clientes...")
 
         self.client_models = {}
+        self.client_weights = {}
         best_acc = -1
         best_cid = -1
 
@@ -92,19 +100,31 @@ class SimpleBagging(BaseStrategy):
             self.client_models[cid] = model
 
             t = fit_res.metrics.get("training_time", 0)
-            acc = fit_res.metrics.get("accuracy", 0)
+            client_acc = fit_res.metrics.get("accuracy", 0)
             f1 = fit_res.metrics.get("f1", 0)
             sz = fit_res.metrics.get("model_size_kb", 0)
-            print(f"    Cliente {cid}: Acc={acc:.4f} F1={f1:.4f} "
+            print(f"    Cliente {cid}: Acc(local)={client_acc:.4f} F1={f1:.4f} "
                   f"Tempo={t:.1f}s Modelo={sz:.1f}KB")
 
-            if acc > best_acc:
-                best_acc = acc
+        # Avaliacao server-side: seleciona best_model e calcula pesos do ensemble
+        # usando o test set do servidor (evita vies de selecao por treino)
+        print(f"  [Servidor] Avaliando modelos no test set do servidor...")
+        for cid, model in self.client_models.items():
+            y_prob = model.predict_proba(self.X_test)[:, 1]
+            y_pred = (y_prob >= 0.5).astype(int)
+            server_acc = float(np.mean(y_pred == self.y_test))
+            self.client_weights[cid] = server_acc
+
+            print(f"    Cliente {cid}: Acc(server)={server_acc:.4f}")
+
+            if server_acc > best_acc:
+                best_acc = server_acc
                 best_cid = cid
 
         if best_cid >= 0:
             self.best_model = self.client_models[best_cid]
-            print(f"  [Servidor] Melhor modelo: Cliente {best_cid} (Acc={best_acc:.4f})")
+            print(f"  [Servidor] Melhor modelo (server-side): "
+                  f"Cliente {best_cid} (Acc={best_acc:.4f})")
 
         if failures:
             print(f"  [Servidor] AVISO: {len(failures)} falha(s)")

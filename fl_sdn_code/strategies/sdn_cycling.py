@@ -12,7 +12,7 @@ from flwr.server.client_manager import ClientManager
 
 from config import (
     NUM_ROUNDS, LOCAL_EPOCHS,
-    LOCAL_EPOCHS_BY_CAT, CLIENT_CATEGORIES,
+    CLIENT_CATEGORIES,
     SDN_ADAPTIVE_EPOCHS,
     HEALTH_SCORE_ENABLED, HEALTH_SCORE_PROFILE,
     HEALTH_SCORE_CUSTOM_WEIGHTS, HEALTH_SCORE_MAX_EXCLUDE,
@@ -145,15 +145,14 @@ class SDNCycling(BaseStrategy):
 
         # 5. Adapta epocas
         cat = CLIENT_CATEGORIES.get(selected_cid, "cat1")
-        base_epochs = LOCAL_EPOCHS_BY_CAT.get(cat, LOCAL_EPOCHS)
         if SDN_ADAPTIVE_EPOCHS:
             adapted = adapt_local_epochs(
-                base_epochs, net_metrics.get(selected_cid, {}), score,
+                LOCAL_EPOCHS, net_metrics.get(selected_cid, {}), score,
             )
-            print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {base_epochs} → {adapted} epocas")
+            print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {LOCAL_EPOCHS} → {adapted} epocas")
         else:
-            adapted = 0  # cliente usara suas proprias epocas por categoria
-            print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {base_epochs} epocas (definido pelo cliente)")
+            adapted = 0
+            print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {LOCAL_EPOCHS} epocas")
 
         # 6. Agrega metricas de rede para o CSV principal
         self._last_network_metrics = self._aggregate_network_metrics(
