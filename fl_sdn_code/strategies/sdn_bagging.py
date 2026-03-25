@@ -130,12 +130,20 @@ class SDNBagging(BaseStrategy):
             print(f"  [SDN] Clientes excluidos por Health Score: {excluded_ids}")
         print(f"  [SDN] Warm start: {has_model}")
 
-        # 4. Aplica QoS
-        for i, cid in enumerate(selected_ids):
-            priority = 1 if i < len(selected_ids) // 2 else 2
+        # 4. Aplica QoS baseado na categoria do cliente
+        # cat1 → EF(46): modelos pequenos, trafego frequente, prioridade alta
+        # cat2 → AF31(26): modelos medios, prioridade media
+        # cat3 → BE(0): modelos grandes, tolerantes a atraso
+        _CAT_TO_PRIORITY = {"cat1": 1, "cat2": 2, "cat3": 3}
+        for cid in selected_ids:
+            cat = CLIENT_CATEGORIES.get(cid, "cat1")
+            priority = _CAT_TO_PRIORITY.get(cat, 2)
             apply_qos_policy(cid, priority)
 
         # 5. Adapta epocas locais
+        # NOTA: quando SDN_ADAPTIVE_EPOCHS=False, enviamos adapted_epochs=0
+        # para que o CLIENTE use suas proprias epocas por categoria.
+        # Isso evita o bug de mapeamento posicao→client_id do client_manager.sample().
         adapted_epochs = {}
         for cid in selected_ids:
             cat = CLIENT_CATEGORIES.get(cid, "cat1")
@@ -145,10 +153,12 @@ class SDNBagging(BaseStrategy):
                 adapted = adapt_local_epochs(
                     base_epochs, net_metrics.get(cid, {}), score,
                 )
+                adapted_epochs[cid] = adapted
+                print(f"  [SDN] Cliente {cid} ({cat}): {base_epochs} → {adapted} epocas")
             else:
-                adapted = base_epochs
-            adapted_epochs[cid] = adapted
-            print(f"  [SDN] Cliente {cid} ({cat}): {base_epochs} → {adapted} epocas")
+                # Nao adapta: cliente usara suas proprias epocas por categoria
+                adapted_epochs[cid] = 0
+                print(f"  [SDN] Cliente {cid} ({cat}): {base_epochs} epocas (definido pelo cliente)")
 
         # 6. Agrega metricas de rede para o CSV principal
         self._last_network_metrics = self._aggregate_network_metrics(

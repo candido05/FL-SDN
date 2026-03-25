@@ -4,6 +4,31 @@ Registro de modificacoes do projeto. Cada entrada documenta o que mudou, por que
 
 ---
 
+## [2026-03-24] Revisao pos-topologia — Correcoes e consolidacao
+
+### Contexto
+Revisao completa apos commits do Joao Victor (SDN Orchestrator + nova topologia 6 FL nodes).
+Diagnostico baseado em logs reais do laboratorio e relatos de problemas.
+
+### Corrigido
+- **config.py**: Removidas duplicacoes de variaveis (SDN_MOCK_MODE, SDN_ADAPTIVE_EPOCHS, SDN_CLIENT_IPS) e anotacoes de rascunho. Valores antigos mantidos como comentarios.
+- **sdn_bagging.py**: QoS DSCP agora atribuido por categoria (cat1→EF, cat2→AF31, cat3→BE) em vez de por posicao na lista.
+- **sdn_bagging.py / sdn_cycling.py**: Quando SDN_ADAPTIVE_EPOCHS=False, envia adapted_epochs=0 para o cliente usar suas proprias epocas por categoria (corrige mapeamento posicao→client_id).
+- **factory.py**: Warm start com reducao gradual de n_estimators (20% por round, min 10%) para evitar acumulo de arvores e overfitting. Aplica a XGBoost, LightGBM e CatBoost.
+- **network.py**: Perfis mock de bandwidth ajustados para coerencia com limiar de 15 Mbps. Docstring corrigida (loss normalization).
+- **test_sdn_network.py**: Teste test_higher_bandwidth_higher_score ajustado para bw_cap=30 (valores 25 e 10 em vez de 80 e 30).
+- **HEALTH_SCORE_THRESHOLD**: 0.30 → 0.50 (valor anterior impossibilitava exclusao em cenarios reais).
+
+### Adicionado
+- `docs/MODIFICACOES_REVISAO_2026-03-24.md` — documento detalhado de todas as modificacoes.
+- Funcao `_count_trees()` em factory.py para contar arvores existentes no XGBoost.
+- Newlines finais em controller.py, network.py, qos.py.
+
+### Testes
+- 98 testes passando (0 falhas, 8 warnings cosmeticos do LightGBM).
+
+---
+
 ## [2026-03-21] Integracao SDN — Eficiencia de Recursos
 
 ### Adicionado

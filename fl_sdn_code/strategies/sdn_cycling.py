@@ -145,9 +145,10 @@ class SDNCycling(BaseStrategy):
             adapted = adapt_local_epochs(
                 base_epochs, net_metrics.get(selected_cid, {}), score,
             )
+            print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {base_epochs} → {adapted} epocas")
         else:
-            adapted = base_epochs
-        print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {base_epochs} → {adapted} epocas")
+            adapted = 0  # cliente usara suas proprias epocas por categoria
+            print(f"  [SDN-Cycling] Cliente {selected_cid} ({cat}): {base_epochs} epocas (definido pelo cliente)")
 
         # 6. Agrega metricas de rede para o CSV principal
         self._last_network_metrics = self._aggregate_network_metrics(

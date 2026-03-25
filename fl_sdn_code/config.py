@@ -4,43 +4,31 @@ Modifique os valores abaixo conforme necessario.
 """
 
 # ---------------------------------------------------------------------------
-# Rede
+# Rede — Topologia GNS3
 # ---------------------------------------------------------------------------
 
+# Endereco do SDN Orchestrator (FastAPI no host Ubuntu)
+# Substituiu a conexao direta ao ODL (porta 8181) para evitar duplo polling
+SDN_ORCHESTRATOR_IP   = "172.16.1.1"
+SDN_ORCHESTRATOR_PORT = "8000"
 
-
-
-# REMOVER estas linhas:
+# Variaveis antigas do ODL:
 # SDN_CONTROLLER_IP   = "172.16.1.1"
 # SDN_CONTROLLER_PORT = "8181"
 # SDN_CONTROLLER_USER = "admin"
 # SDN_CONTROLLER_PASS = "admin"
 
-# ADICIONAR / SUBSTITUIR por:
-SDN_ORCHESTRATOR_IP   = "172.16.1.1"   # mesmo host — porta FastAPI
-SDN_ORCHESTRATOR_PORT = "8000"
-
-# Desativar para experimentos comparativos justos (não reduz épocas por rede ruim):
-SDN_ADAPTIVE_EPOCHS    = False
-
-# Garantir modo real:
-SDN_MOCK_MODE          = False
-
-
-
-# Mapeamento client_id → IP (deve bater com o experimento atual):
+# Mapeamento client_id → IP na rede GNS3
 SDN_CLIENT_IPS = {
-    0: "172.16.1.10",   # FL-Node-1-cat1
-    1: "172.16.1.16",   # FL-Node-5-cat1
-    2: "172.16.1.11",   # FL-Node-2-cat2
-    3: "172.16.1.14",   # FL-Node-4-cat2
-    4: "172.16.1.13",   # FL-Node-3-cat3
-    5: "172.16.1.17",   # FL-Node-6-cat3
+    0: "172.16.1.10",   # FL-Node-1 (cat1)
+    1: "172.16.1.16",   # FL-Node-5 (cat1)
+    2: "172.16.1.11",   # FL-Node-2 (cat2)
+    3: "172.16.1.14",   # FL-Node-4 (cat2)
+    4: "172.16.1.13",   # FL-Node-3 (cat3)
+    5: "172.16.1.17",   # FL-Node-6 (cat3)
 }
 
-
-
-# Épocas locais por categoria (simula diferença de capacidade computacional)
+# Epocas locais por categoria (simula diferenca de capacidade computacional)
 LOCAL_EPOCHS_BY_CAT = {
     "cat1": 50,   # low — treina menos, modelo menor
     "cat2": 100,  # medium
@@ -119,33 +107,34 @@ CATBOOST_PARAMS = {
 }
 
 # ---------------------------------------------------------------------------
-# Integracao SDN (OpenDaylight)
+# Integracao SDN — Limiares e scoring
 # ---------------------------------------------------------------------------
 
-# Conexao com o controlador SDN
-
-# Modo mock: True = gera metricas simuladas (sem ODL real)
+# Modo mock: True = gera metricas simuladas (sem orquestrador real)
 # Util para testes locais e validacao da logica
-#SDN_MOCK_MODE = True
+SDN_MOCK_MODE = False
+#SDN_MOCK_MODE = True   # descomentar para testes locais sem SDN
 
-# Ajustar limiares para alinhar com o SDN (REROUTE_THRESH × 20 Mbps = 15 Mbps):
-SDN_MIN_BANDWIDTH_MBPS = 15.0   # era 10 — alinhado com REROUTE_THRESH do orquestrador
+# Adaptacao de epocas locais baseada em rede
+# True = ajusta epocas conforme efficiency_score do cliente
+# False = usa epocas fixas por categoria (comportamento original)
+# ATENCAO: manter False nos experimentos com/sem SDN para comparacao justa
+SDN_ADAPTIVE_EPOCHS = False
+#SDN_ADAPTIVE_EPOCHS = True   # descomentar se quiser adaptacao por rede
 
 # Limiares de elegibilidade de clientes
+# Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps = 15 Mbps)
+SDN_MIN_BANDWIDTH_MBPS = 15.0
+#SDN_MIN_BANDWIDTH_MBPS = 10.0  # valor anterior (topologia antiga 100 Mbps)
 SDN_MAX_LATENCY_MS     = 50.0   # Latencia maxima aceita
 SDN_MAX_PACKET_LOSS    = 0.10   # Perda de pacotes maxima (10%)
 
 # Pesos para calculo do efficiency_score (devem somar 1.0)
 SDN_SCORE_WEIGHTS = {
-    "bandwidth":   0.5,   # Peso da largura de banda
-    "latency":     0.3,   # Peso da latencia
-    "packet_loss": 0.2,   # Peso da perda de pacotes
+    "bandwidth":   0.5,
+    "latency":     0.3,
+    "packet_loss": 0.2,
 }
-
-# Adaptacao de epocas locais baseada em rede
-# True = ajusta epocas conforme efficiency_score do cliente
-# False = usa epocas fixas por categoria (comportamento original)
-#SDN_ADAPTIVE_EPOCHS = True
 
 # ---------------------------------------------------------------------------
 # Client Health Score — selecao/exclusao dinamica de clientes
@@ -175,12 +164,9 @@ HEALTH_SCORE_MAX_EXCLUDE = 2
 HEALTH_SCORE_MIN_ROUNDS = 2
 
 # Clientes com score abaixo deste limiar sao candidatos a exclusao
-HEALTH_SCORE_THRESHOLD = 0.30
+HEALTH_SCORE_THRESHOLD = 0.50
 
 # Habilitar/desabilitar o sistema de health score
 # True = ativa exclusao dinamica nas estrategias SDN
 # False = comportamento original (sem exclusao)
 HEALTH_SCORE_ENABLED = True
-
-# Mapeamento client_id → IP na rede GNS3
-

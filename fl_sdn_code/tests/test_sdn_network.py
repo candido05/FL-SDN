@@ -27,8 +27,9 @@ class TestEfficiencyScore:
         assert 0.0 <= score <= 1.0
 
     def test_higher_bandwidth_higher_score(self):
-        m1 = {"bandwidth_mbps": 80, "latency_ms": 10, "packet_loss": 0.01}
-        m2 = {"bandwidth_mbps": 30, "latency_ms": 10, "packet_loss": 0.01}
+        # bw_cap = SDN_MIN_BANDWIDTH_MBPS * 2 = 30, usar valores dentro desse range
+        m1 = {"bandwidth_mbps": 25, "latency_ms": 10, "packet_loss": 0.01}
+        m2 = {"bandwidth_mbps": 10, "latency_ms": 10, "packet_loss": 0.01}
         assert calculate_efficiency_score(m1) > calculate_efficiency_score(m2)
 
     def test_lower_latency_higher_score(self):
@@ -54,7 +55,7 @@ class TestFilterEligibleClients:
     def test_low_bandwidth_excluded(self):
         metrics = {
             0: {"bandwidth_mbps": 80, "latency_ms": 5, "packet_loss": 0.01},
-            1: {"bandwidth_mbps": 5, "latency_ms": 10, "packet_loss": 0.02},  # < 10 Mbps
+            1: {"bandwidth_mbps": 5, "latency_ms": 10, "packet_loss": 0.02},  # < 15 Mbps
         }
         eligible = filter_eligible_clients(metrics)
         assert 0 in eligible

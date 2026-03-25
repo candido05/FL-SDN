@@ -91,17 +91,17 @@ def _mock_network_metrics(client_ids: List[int]) -> Dict[int, Dict[str, float]]:
     Os perfis refletem as categorias cat1/cat2/cat3 do experimento.
     """
     profiles = {
-        # cat1 (client 0, 1) — baixa capacidade, boa rede (modelos menores)
-        0: {"bw_range": (14, 18), "lat_range": (1, 5),  "loss_range": (0,    0.005)},
-        1: {"bw_range": (12, 17), "lat_range": (2, 7),  "loss_range": (0,    0.008)},
-        # cat2 (client 2, 3) — capacidade média
-        2: {"bw_range": (10, 16), "lat_range": (3, 12), "loss_range": (0.002, 0.02)},
-        3: {"bw_range": (13, 18), "lat_range": (2, 8),  "loss_range": (0,    0.01)},
-        # cat3 (client 4, 5) — modelos grandes, mais pressão sobre a rede
-        4: {"bw_range": (8,  14), "lat_range": (5, 25), "loss_range": (0.005, 0.04)},
-        5: {"bw_range": (10, 15), "lat_range": (4, 15), "loss_range": (0.002, 0.02)},
+        # cat1 (client 0, 1) — modelos menores, boa rede (quase sempre elegivel)
+        0: {"bw_range": (16, 20), "lat_range": (1, 5),  "loss_range": (0,    0.005)},
+        1: {"bw_range": (15, 19), "lat_range": (2, 7),  "loss_range": (0,    0.008)},
+        # cat2 (client 2, 3) — rede media (ocasionalmente abaixo do limiar)
+        2: {"bw_range": (13, 18), "lat_range": (3, 12), "loss_range": (0.002, 0.02)},
+        3: {"bw_range": (15, 20), "lat_range": (2, 8),  "loss_range": (0,    0.01)},
+        # cat3 (client 4, 5) — modelos grandes, rede sob pressao (risco de exclusao)
+        4: {"bw_range": (11, 17), "lat_range": (5, 25), "loss_range": (0.005, 0.04)},
+        5: {"bw_range": (13, 18), "lat_range": (4, 15), "loss_range": (0.002, 0.02)},
     }
-    default = {"bw_range": (10, 18), "lat_range": (3, 15), "loss_range": (0, 0.02)}
+    default = {"bw_range": (14, 20), "lat_range": (3, 15), "loss_range": (0, 0.02)}
 
     metrics = {}
     for cid in client_ids:
@@ -128,9 +128,9 @@ def calculate_efficiency_score(metrics: Dict[str, float]) -> float:
     Score mais alto = melhor condição de rede.
 
     Normalização:
-      bandwidth: relativo a MAX_LINK_CAPACITY do orquestrador (20 Mbps)
-      latency:   máximo tolerável = SDN_MAX_LATENCY_MS
-      loss:      máximo tolerável = SDN_MAX_PACKET_LOSS × 10 (escala 0-1)
+      bandwidth: relativo a SDN_MIN_BANDWIDTH_MBPS × 2 (30 Mbps para links de 20 Mbps)
+      latency:   máximo tolerável = SDN_MAX_LATENCY_MS (50 ms)
+      loss:      máximo tolerável = SDN_MAX_PACKET_LOSS (10%)
     """
     w   = SDN_SCORE_WEIGHTS
     bw  = metrics.get("bandwidth_mbps", 0)
