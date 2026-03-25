@@ -1,0 +1,87 @@
+"""
+Gerenciamento centralizado de paths dos datasets.
+
+Todos os datasets ficam em fl_sdn_code/data/<nome_dataset>/.
+Joao Victor deve colocar os arquivos nas pastas corretas antes de executar.
+
+Estrutura esperada:
+    data/
+    ├── higgs/
+    │   ├── higgs_X.npy          (N_SAMPLES amostras, 28 features)
+    │   └── higgs_y.npy          (N_SAMPLES labels)
+    ├── higgs_full/
+    │   ├── HIGGS.csv.gz         (11M amostras, baixar de UCI)
+    │   ├── higgs_full_X.npy     (gerado por prepare_datasets.py)
+    │   └── higgs_full_y.npy     (gerado por prepare_datasets.py)
+    ├── epsilon/
+    │   ├── epsilon_normalized.bz2       (treino, baixar de LIBSVM)
+    │   ├── epsilon_normalized.t.bz2     (teste, baixar de LIBSVM)
+    │   ├── epsilon_X.npy        (gerado por prepare_datasets.py)
+    │   └── epsilon_y.npy        (gerado por prepare_datasets.py)
+    └── avazu/
+        ├── train.csv            (ou train.gz, baixar do Kaggle)
+        ├── avazu_X.npy          (gerado por prepare_datasets.py)
+        └── avazu_y.npy          (gerado por prepare_datasets.py)
+"""
+
+import os
+
+# Raiz da pasta data/
+_BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+
+
+def data_dir(dataset_name: str) -> str:
+    """Retorna o path da pasta de um dataset."""
+    return os.path.join(_BASE_DIR, dataset_name)
+
+
+def npy_paths(dataset_name: str) -> tuple:
+    """
+    Retorna (X_path, y_path) dos .npy preprocessados de um dataset.
+
+    Returns:
+        (str, str): Caminhos para os arquivos X e y.
+    """
+    d = data_dir(dataset_name)
+    x_path = os.path.join(d, f"{dataset_name}_X.npy")
+    y_path = os.path.join(d, f"{dataset_name}_y.npy")
+    return x_path, y_path
+
+
+def is_prepared(dataset_name: str) -> bool:
+    """Verifica se os .npy ja foram gerados para um dataset."""
+    x_path, y_path = npy_paths(dataset_name)
+    return os.path.exists(x_path) and os.path.exists(y_path)
+
+
+# Metadados dos datasets
+DATASET_INFO = {
+    "higgs": {
+        "description": "Higgs boson (reduzido, 50k amostras) — ja disponivel",
+        "features": 28,
+        "task": "binary",
+        "source": "OpenML (higgs v2)",
+    },
+    "higgs_full": {
+        "description": "Higgs boson (completo, 11M amostras)",
+        "features": 28,
+        "task": "binary",
+        "source": "UCI ML Repository — HIGGS.csv.gz",
+        "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/00280/HIGGS.csv.gz",
+    },
+    "epsilon": {
+        "description": "Epsilon (400k treino + 100k teste, 2000 features)",
+        "features": 2000,
+        "task": "binary",
+        "source": "LIBSVM — epsilon_normalized",
+        "url_train": "https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary/epsilon_normalized.bz2",
+        "url_test": "https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary/epsilon_normalized.t.bz2",
+    },
+    "avazu": {
+        "description": "Avazu CTR (40M amostras, features categoricas hashed)",
+        "features": "variavel (apos hashing)",
+        "task": "binary",
+        "source": "Kaggle — Avazu Click-Through Rate Prediction",
+        "url": "https://www.kaggle.com/c/avazu-ctr-prediction/data",
+    },
+}

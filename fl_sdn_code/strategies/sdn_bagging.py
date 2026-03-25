@@ -121,6 +121,13 @@ class SDNBagging(BaseStrategy):
                 for cid in excluded_ids:
                     eligible.pop(cid, None)
 
+        # Fallback: se Health Score excluiu todos os elegiveis, usa todos
+        if not eligible:
+            print(f"  [SDN] AVISO: Health Score excluiu todos os elegiveis! "
+                  f"Revertendo exclusoes.")
+            eligible = {cid: 0.5 for cid in all_client_ids}
+            excluded_ids = []
+
         # 4. Seleciona os melhores dentre os elegiveis restantes
         sorted_clients = sorted(eligible.items(), key=lambda x: x[1], reverse=True)
         selected_ids = [cid for cid, _ in sorted_clients]

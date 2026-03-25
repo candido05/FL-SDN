@@ -187,6 +187,9 @@ def main():
                         help="ID do cliente (0-5)")
     parser.add_argument("--model", type=str, required=True,
                         choices=["xgboost", "lightgbm", "catboost"])
+    parser.add_argument("--dataset", type=str, default="higgs",
+                        choices=["higgs", "higgs_full", "epsilon", "avazu"],
+                        help="Dataset a utilizar (default: higgs)")
     args = parser.parse_args()
 
     category = CLIENT_CATEGORIES.get(args.client_id, "cat1")
@@ -199,9 +202,9 @@ def main():
     print(f"  Epocas locais: {local_epochs} | Log a cada: {LOG_EVERY}")
     print(f"{'='*60}")
 
-    print(f"[Cliente {args.client_id}] Carregando dataset Higgs...")
+    print(f"[Cliente {args.client_id}] Carregando dataset {args.dataset}...")
     X_train, y_train, X_test, y_test = DatasetRegistry.load(
-        "higgs", role="client", client_id=args.client_id,
+        args.dataset, role="client", client_id=args.client_id,
     )
 
     client = SimpleClient(

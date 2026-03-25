@@ -209,6 +209,11 @@ class ClientHealthTracker:
 
         Chamado no configure_fit() ANTES de selecionar clientes.
         Usa os scores calculados no update_round() anterior.
+
+        Protecoes:
+        - Nunca exclui mais que max_exclude
+        - Nunca exclui mais que metade dos candidatos ATUAIS
+        - Garante que pelo menos 1 candidato permanece
         """
         if not self._last_scores:
             return []
@@ -219,7 +224,9 @@ class ClientHealthTracker:
             if info and info.get("excluded", False):
                 excluded.append(cid)
 
-        return excluded[:self._max_exclude]
+        # Limita: max_exclude E nunca mais que metade dos candidatos atuais
+        max_allowed = min(self._max_exclude, len(candidate_ids) // 2)
+        return excluded[:max_allowed]
 
     def get_client_history(self, client_id: int) -> List[Dict]:
         """Retorna historico completo de um cliente."""

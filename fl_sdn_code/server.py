@@ -42,6 +42,9 @@ def main():
                         choices=["xgboost", "lightgbm", "catboost"])
     parser.add_argument("--strategy", type=str, required=True,
                         choices=["bagging", "cycling", "sdn-bagging", "sdn-cycling"])
+    parser.add_argument("--dataset", type=str, default="higgs",
+                        choices=["higgs", "higgs_full", "epsilon", "avazu"],
+                        help="Dataset a utilizar (default: higgs)")
     args = parser.parse_args()
 
     exp_name = os.environ.get("EXP", "experimento")
@@ -54,8 +57,8 @@ def main():
     print(f"  Run dir:     {run_dir}")
     print(f"{'='*60}")
 
-    print("[Servidor] Carregando dataset Higgs...")
-    X_test, y_test = DatasetRegistry.load("higgs", role="server")
+    print(f"[Servidor] Carregando dataset {args.dataset}...")
+    X_test, y_test = DatasetRegistry.load(args.dataset, role="server")
 
     strategy = create_strategy(
         name=args.strategy,
@@ -66,6 +69,7 @@ def main():
     )
 
     print(f"\n[Servidor] Configuracao:")
+    print(f"    Dataset:     {args.dataset}")
     print(f"    Modelo:      {args.model}")
     print(f"    Estrategia:  {args.strategy}")
     print(f"    Rounds:      {NUM_ROUNDS}")

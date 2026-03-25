@@ -39,6 +39,8 @@ class ResourceMonitor:
     def start(self) -> None:
         """Inicia coleta de CPU/RAM em background."""
         if not _HAS_PSUTIL:
+            print("  [ResourceMonitor] AVISO: psutil nao instalado — "
+                  "metricas de CPU/RAM serao 0.0. Instale com: pip install psutil")
             return
         self._cpu_samples = []
         self._ram_samples = []

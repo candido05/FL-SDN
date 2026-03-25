@@ -3,7 +3,7 @@
 Revisao completa do codigo apos commits do Joao Victor (topologia nova, SDN Orchestrator)
 e diagnostico de problemas reportados nos logs do laboratorio.
 
-**Arquivos modificados:** 8
+**Arquivos modificados:** 10
 **Testes:** 98 passando (0 falhas)
 **Base:** commit `eff18d3` (configuracoes novas para refletir a nova topologia)
 
@@ -209,6 +209,62 @@ impossivel que um cliente tivesse health_score < 0.30 nos cenarios reais:
 
 Com `threshold=0.50`, clientes com desempenho abaixo da media em 2+ dimensoes
 passam a ser candidatos a exclusao, tornando o Health Score funcional.
+
+---
+
+## 10. core/resources.py — Aviso de psutil ausente
+
+### Problema
+Quando psutil nao esta instalado (ex: containers GNS3 Docker), o `ResourceMonitor`
+retornava `CPU: 0.0% | RAM: 0.0 MB` **sem nenhum aviso** no log. O usuario no
+laboratorio nao sabia que as metricas estavam vazias por falta da dependencia.
+
+### Correcao
+Adicionado print de aviso em `start()` quando `_HAS_PSUTIL = False`:
+```
+[ResourceMonitor] AVISO: psutil nao instalado — metricas de CPU/RAM serao 0.0. Instale com: pip install psutil
+```
+
+---
+
+## 11. strategies/sdn_bagging.py — Fallback quando Health Score exclui todos
+
+### Problema (BUG)
+Apos `filter_eligible_clients()` e `get_excluded_clients()`, era possivel que
+`eligible` ficasse vazio (rede filtra metade + health score exclui o resto).
+Nesse cenario, `selected_ids = []` e **nenhum cliente treinava** no round.
+
+O `sdn_cycling.py` ja tinha fallback (linha 124-127), mas o `sdn_bagging.py` nao.
+
+### Correcao
+Adicionado fallback apos exclusao do Health Score:
+```python
+if not eligible:
+    print(f"  [SDN] AVISO: Health Score excluiu todos os elegiveis! "
+          f"Revertendo exclusoes.")
+    eligible = {cid: 0.5 for cid in all_client_ids}
+    excluded_ids = []
+```
+
+---
+
+## 12. core/health_score.py — Protecao de exclusao sobre pool atual
+
+### Problema
+`_determine_exclusions()` limitava exclusoes a `len(cids) // 2`, mas `cids` vinha
+do round **anterior** (do `update_round`). Porem, `get_excluded_clients()` recebe
+`candidate_ids` do round **atual** (apos filtragem de rede). Se a rede filtrasse
+metade dos clientes, a protecao de "nunca mais que metade" nao protegia o pool real.
+
+Exemplo: 6 treinaram no round anterior → `len(cids)//2 = 3` → marca 2 para exclusao.
+Round atual: rede filtra 3 → sobram 3 elegiveis → health score exclui 2 → **1 cliente**.
+
+### Correcao
+`get_excluded_clients()` agora limita tambem por `len(candidate_ids) // 2`:
+```python
+max_allowed = min(self._max_exclude, len(candidate_ids) // 2)
+return excluded[:max_allowed]
+```
 
 ---
 
