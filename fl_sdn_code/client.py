@@ -43,6 +43,8 @@ from config import (
 )
 from core.metrics import compute_all_metrics, print_metrics_table
 from core.serialization import serialize_model
+from core.csv_logger import ClientRoundLogger
+from core.epoch_logger import EpochLogger
 from datasets import DatasetRegistry
 from models.factory import ModelFactory
 
@@ -59,11 +61,13 @@ class SimpleClient(fl.client.Client):
     """
 
     def __init__(self, client_id: int, model_type: str, local_epochs: int,
-                 category: str, X_train, y_train, X_test, y_test):
+                 category: str, X_train, y_train, X_test, y_test,
+                 dataset: str = "unknown"):
         self.client_id = client_id
         self.model_type = model_type
         self.local_epochs = local_epochs
         self.category = category
+        self.dataset = dataset
         self.X_train = X_train
         self.y_train = y_train
         self.X_test = X_test
@@ -76,6 +80,12 @@ class SimpleClient(fl.client.Client):
             self.extra_params = TUNED_PARAMS
             print(f"  [Cliente {client_id}] Usando params tunados: "
                   f"{self.extra_params}")
+
+        # Loggers locais — escrevem no OUTPUT_DIR (env var) ou diretorio atual
+        run_dir = os.environ.get("OUTPUT_DIR", os.path.join("output", "local"))
+        exp_name = os.environ.get("EXP", "experimento")
+        self._client_round_logger = ClientRoundLogger(run_dir, exp_name)
+        self._epoch_logger = EpochLogger(run_dir, exp_name)
 
     def fit(self, ins: FitIns) -> FitRes:
         config = ins.config
@@ -109,11 +119,14 @@ class SimpleClient(fl.client.Client):
             except Exception as e:
                 print(f"    [Cliente {self.client_id}] Falha no warm start: {e}")
 
+        self._epoch_logger.start_round()
         t0 = time.time()
         self.model = ModelFactory.train(
             self.model_type, self.X_train, self.y_train,
             self.client_id, server_round, round_epochs, warm_model,
             extra_params=self.extra_params,
+            epoch_logger=self._epoch_logger,
+            dataset=self.dataset,
         )
         elapsed = time.time() - t0
 
@@ -145,6 +158,19 @@ class SimpleClient(fl.client.Client):
         for k, v in metrics.items():
             if not k.startswith("_"):
                 fit_metrics[k] = float(v)
+
+        # Loga metricas completas do cliente (12 metricas + confusion matrix)
+        self._client_round_logger.log(
+            server_round=server_round,
+            client_id=self.client_id,
+            model_type=self.model_type,
+            dataset=self.dataset,
+            local_epochs=round_epochs,
+            training_time_sec=elapsed,
+            model_size_kb=model_size_kb,
+            metrics=metrics,
+            warm_start=use_warm,
+        )
 
         return FitRes(
             status=Status(code=Code.OK, message="OK"),
@@ -211,6 +237,7 @@ def main():
         y_train=y_train,
         X_test=X_test,
         y_test=y_test,
+        dataset=args.dataset,
     )
 
     print(f"\n[Cliente {args.client_id}] Conectando ao servidor: {CLIENT_CONNECT_ADDRESS}")

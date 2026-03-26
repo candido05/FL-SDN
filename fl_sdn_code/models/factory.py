@@ -25,7 +25,7 @@ from config import (
     WARM_START_TREE_DECAY, WARM_START_TREE_MIN_RATIO,
     WARM_START_LR_DECAY, WARM_START_LR_MIN_RATIO,
 )
-from models.callbacks import XGBoostProgressCallback, lgb_progress_callback
+from models.callbacks import XGBoostProgressCallback, lgb_progress_callback, CatBoostEpochRecorder
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +172,15 @@ class ModelFactory:
     @classmethod
     def train(cls, model_type: str, X_train, y_train, client_id: int,
               server_round: int, local_epochs: int, warm_start_model=None,
-              extra_params=None):
-        """Cria e treina modelo do tipo especificado."""
+              extra_params=None, epoch_logger=None, dataset: str = "unknown"):
+        """
+        Cria e treina modelo do tipo especificado.
+
+        Args:
+            epoch_logger: Instancia de EpochLogger (opcional). Se fornecida,
+                          registra o loss a cada boosting iteration.
+            dataset:      Nome do dataset (para o epoch log).
+        """
         builder = cls._BUILDERS.get(model_type)
         if builder is None:
             raise ValueError(
@@ -181,7 +188,8 @@ class ModelFactory:
                 f"Disponiveis: {list(cls._BUILDERS.keys())}"
             )
         return builder(X_train, y_train, client_id, server_round,
-                        local_epochs, warm_start_model, extra_params)
+                       local_epochs, warm_start_model, extra_params,
+                       epoch_logger, dataset)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +198,8 @@ class ModelFactory:
 
 @ModelFactory.register("xgboost")
 def _train_xgboost(X_train, y_train, client_id, server_round,
-                    local_epochs, warm_start_model, extra_params):
+                    local_epochs, warm_start_model, extra_params,
+                    epoch_logger=None, dataset="unknown"):
     # Warm start: decaimento exponencial de n_estimators e learning_rate
     base_lr = XGBOOST_PARAMS["learning_rate"]
     if warm_start_model is not None:
@@ -213,8 +222,6 @@ def _train_xgboost(X_train, y_train, client_id, server_round,
 
     params = {**XGBOOST_PARAMS, "n_estimators": n_new, "learning_rate": lr_adjusted}
     if extra_params:
-        # extra_params pode sobrescrever tudo exceto learning_rate no warm start
-        # (ja calculamos lr_adjusted usando extra_params como base)
         ep = {k: v for k, v in extra_params.items() if k != "learning_rate"}
         params.update(ep)
 
@@ -246,6 +253,15 @@ def _train_xgboost(X_train, y_train, client_id, server_round,
         if actual < n_new:
             print(f"    [XGBoost] Early stopping na iteracao {actual}/{n_new}")
 
+    # Loga historico de epocas
+    if epoch_logger is not None and cb.loss_history:
+        for ep_num, train_l, val_l in cb.loss_history:
+            epoch_logger.log_epoch(
+                server_round, client_id, "xgboost", dataset,
+                ep_num, n_new, train_l, val_l,
+            )
+        epoch_logger.flush()
+
     # Limpar callbacks para que pickle nao tente serializa-los
     model.set_params(callbacks=None)
     if hasattr(model, '_callbacks'):
@@ -255,7 +271,8 @@ def _train_xgboost(X_train, y_train, client_id, server_round,
 
 @ModelFactory.register("lightgbm")
 def _train_lightgbm(X_train, y_train, client_id, server_round,
-                     local_epochs, warm_start_model, extra_params):
+                     local_epochs, warm_start_model, extra_params,
+                     epoch_logger=None, dataset="unknown"):
     base_lr = LIGHTGBM_PARAMS["learning_rate"]
     if warm_start_model is not None:
         n_existing = _count_trees_lgb(warm_start_model)
@@ -282,7 +299,8 @@ def _train_lightgbm(X_train, y_train, client_id, server_round,
     # Validation split para early stopping
     X_fit, X_val, y_fit, y_val = _make_val_split(X_train, y_train)
 
-    progress_cb = lgb_progress_callback(client_id, server_round, n_new)
+    # lgb_progress_callback agora retorna (fn, loss_history)
+    progress_cb, lgb_loss_history = lgb_progress_callback(client_id, server_round, n_new)
     callbacks = [progress_cb]
     if X_val is not None:
         callbacks.append(lgb.early_stopping(EARLY_STOPPING_ROUNDS))
@@ -307,12 +325,22 @@ def _train_lightgbm(X_train, y_train, client_id, server_round,
         if actual > 0 and actual < n_new:
             print(f"    [LightGBM] Early stopping na iteracao {actual}/{n_new}")
 
+    # Loga historico de epocas
+    if epoch_logger is not None and lgb_loss_history:
+        for ep_num, train_l, val_l in lgb_loss_history:
+            epoch_logger.log_epoch(
+                server_round, client_id, "lightgbm", dataset,
+                ep_num, n_new, train_l, val_l,
+            )
+        epoch_logger.flush()
+
     return model
 
 
 @ModelFactory.register("catboost")
 def _train_catboost(X_train, y_train, client_id, server_round,
-                    local_epochs, warm_start_model, extra_params):
+                    local_epochs, warm_start_model, extra_params,
+                    epoch_logger=None, dataset="unknown"):
     base_lr = CATBOOST_PARAMS["learning_rate"]
     if warm_start_model is not None:
         n_existing = _count_trees_catboost(warm_start_model)
@@ -342,13 +370,17 @@ def _train_catboost(X_train, y_train, client_id, server_round,
     if X_val is not None:
         params["early_stopping_rounds"] = EARLY_STOPPING_ROUNDS
 
+    # Recorder de epocas para CatBoost
+    recorder = CatBoostEpochRecorder(client_id, server_round, n_new)
+    cb_list = [recorder]
+
     model = CatBoostClassifier(**params)
 
     print(f"    [Cliente {client_id}] Round {server_round} | "
           f"Treinando CatBoost ({n_new} iteracoes)...")
     sys.stdout.flush()
 
-    fit_kwargs = {"verbose": False}
+    fit_kwargs = {"verbose": False, "callbacks": cb_list}
     if X_val is not None:
         fit_kwargs["eval_set"] = (X_val, y_val)
 
@@ -362,6 +394,15 @@ def _train_catboost(X_train, y_train, client_id, server_round,
         actual = model.tree_count_
         if actual < n_new:
             print(f"    [CatBoost] Early stopping na iteracao {actual}/{n_new}")
+
+    # Loga historico de epocas
+    if epoch_logger is not None and recorder.loss_history:
+        for ep_num, train_l, val_l in recorder.loss_history:
+            epoch_logger.log_epoch(
+                server_round, client_id, "catboost", dataset,
+                ep_num, n_new, train_l, val_l,
+            )
+        epoch_logger.flush()
 
     print(f"    [Cliente {client_id}] Round {server_round} | "
           f"CatBoost {model.tree_count_}/{n_new} iteracoes concluidas")

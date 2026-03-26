@@ -24,6 +24,7 @@ from flwr.server.strategy import Strategy
 from flwr.server.client_manager import ClientManager
 
 from core.metrics import compute_all_metrics, print_metrics_table
+from core.csv_logger import ConvergenceLogger
 
 
 class BaseStrategy(Strategy):
@@ -34,12 +35,18 @@ class BaseStrategy(Strategy):
         self.X_test = X_test
         self.y_test = y_test
         self._logger = None  # CSVLogger, injetado via set_logger()
+        self._convergence_logger = None  # ConvergenceLogger
         self._last_resource_metrics: Dict = {}
         self._last_network_metrics: Dict = {}
 
     def set_logger(self, logger) -> None:
-        """Injeta o CSVLogger do server.py. Repassa run_dir para subclasses."""
+        """Injeta o CSVLogger do server.py. Cria ConvergenceLogger automaticamente."""
         self._logger = logger
+        # ConvergenceLogger usa o mesmo run_dir e exp_name do CSVLogger
+        self._convergence_logger = ConvergenceLogger(
+            run_dir=logger.run_dir,
+            exp_name=logger.exp_name,
+        )
         self._on_logger_set(logger)
 
     def _on_logger_set(self, logger) -> None:
@@ -65,12 +72,17 @@ class BaseStrategy(Strategy):
         print(f"\n  {self._eval_label(server_round)}")
         print_metrics_table("Avaliacao no conjunto de teste:", metrics)
 
+        elapsed = self._logger.total_elapsed() if self._logger else 0.0
+
         if self._logger:
             self._logger.log_round(
                 server_round, metrics,
                 resource_metrics=self._last_resource_metrics,
                 network_metrics=self._last_network_metrics,
             )
+
+        if self._convergence_logger:
+            self._convergence_logger.log_round(server_round, metrics, elapsed)
 
         # Retorna dict sem chaves internas (_tp, _fp, etc.)
         public_metrics = {k: v for k, v in metrics.items() if not k.startswith("_")}
