@@ -8,11 +8,13 @@ para cada dataset.
 Pipeline por dataset:
   HIGGS Full:   limpeza de outliers + interacoes fisicas + remocao de correlacoes
   Epsilon:      selecao de features por variancia + remocao de correlacoes
+  MNIST:        normalizacao + remocao de pixels constantes/baixa variancia
   Avazu:        feature engineering temporal + Feature Hashing (data-independent)
 
 Uso:
     python tools/prepare_datasets.py --dataset higgs_full
     python tools/prepare_datasets.py --dataset epsilon
+    python tools/prepare_datasets.py --dataset mnist
     python tools/prepare_datasets.py --dataset avazu
     python tools/prepare_datasets.py --all
 
@@ -104,7 +106,7 @@ def log_preprocessing_summary(X_original_shape, X_final_shape, label=""):
     """Imprime resumo do preprocessing."""
     n_orig, f_orig = X_original_shape
     n_final, f_final = X_final_shape
-    print(f"  [{label}] Preprocessing: {f_orig} → {f_final} features "
+    print(f"  [{label}] Preprocessing: {f_orig} -> {f_final} features "
           f"({n_final:,} amostras)")
 
 
@@ -316,6 +318,197 @@ def prepare_epsilon():
 
 
 # ======================================================================
+# Credit Card Fraud Detection (284k amostras, 30 features)
+# ======================================================================
+
+def prepare_creditcard():
+    """
+    Pre-processa Credit Card Fraud Detection dataset (ULB).
+
+    Fonte: OpenML (creditcard, dataset_id=1597) ou Kaggle.
+
+    Preprocessing (tudo data-independent, compativel com FL):
+      1. Remocao da coluna Time (indice sequencial, sem sentido em FL)
+      2. Criacao de feature Hour: ciclo de 24h derivado de Time (sin/cos)
+         — data-independent, cada transacao usa apenas seu proprio Time
+      3. Normalizacao de Amount via log1p (data-independent)
+      4. Features V1-V28 mantidas como estao (ja PCA-normalizadas pela ULB)
+      5. Conversao para float32
+    """
+    d = data_dir("creditcard")
+    os.makedirs(d, exist_ok=True)
+    x_path, y_path = npy_paths("creditcard")
+
+    # Tenta carregar CSV local primeiro
+    csv_candidates = [
+        os.path.join(d, "creditcard.csv"),
+        os.path.join(d, "creditcard.csv.gz"),
+    ]
+    csv_file = None
+    for f in csv_candidates:
+        if os.path.exists(f):
+            csv_file = f
+            break
+
+    t0 = time.time()
+
+    if csv_file:
+        import pandas as pd
+        print(f"[CreditCard] Lendo {csv_file}...")
+        df = pd.read_csv(csv_file)
+        X_raw = df.drop(columns=["Class"]).values
+        y = df["Class"].values
+        col_names = [c for c in df.columns if c != "Class"]
+    else:
+        # Fallback: OpenML
+        from sklearn.datasets import fetch_openml
+        print("[CreditCard] Baixando dataset via OpenML (creditcard)...")
+        print("[CreditCard] Isso pode levar alguns minutos na primeira vez...")
+        data = fetch_openml(data_id=1597, as_frame=True, parser="auto")
+        df = data.frame
+        y = df["Class"].astype(int).values
+        X_raw = df.drop(columns=["Class"]).values.astype(np.float64)
+        col_names = [c for c in df.columns if c != "Class"]
+
+    print(f"[CreditCard] {X_raw.shape[0]:,} transacoes carregadas em "
+          f"{time.time()-t0:.0f}s")
+    print(f"  Shape original: {X_raw.shape}")
+
+    # Identificar colunas por nome
+    time_idx = col_names.index("Time") if "Time" in col_names else None
+    amount_idx = col_names.index("Amount") if "Amount" in col_names else None
+
+    features = []
+    feat_names = []
+
+    # 1. Features V1-V28 (ja PCA-normalizadas, manter como estao)
+    for i, name in enumerate(col_names):
+        if name.startswith("V"):
+            features.append(X_raw[:, i].reshape(-1, 1))
+            feat_names.append(name)
+
+    # 2. Hour features derivadas de Time (ciclo 24h, data-independent)
+    if time_idx is not None:
+        time_col = X_raw[:, time_idx]
+        # Time esta em segundos desde a primeira transacao (~48h de dados)
+        hour_of_day = (time_col % 86400) / 3600  # 0-24
+        hour_sin = np.sin(2 * np.pi * hour_of_day / 24).astype(np.float32)
+        hour_cos = np.cos(2 * np.pi * hour_of_day / 24).astype(np.float32)
+        features.append(hour_sin.reshape(-1, 1))
+        features.append(hour_cos.reshape(-1, 1))
+        feat_names.extend(["hour_sin", "hour_cos"])
+        print(f"  [CreditCard] Time -> hour_sin/hour_cos (ciclo 24h)")
+
+    # 3. Amount normalizado via log1p (data-independent)
+    if amount_idx is not None:
+        amount = X_raw[:, amount_idx]
+        amount_log = np.log1p(amount).astype(np.float32)
+        features.append(amount_log.reshape(-1, 1))
+        feat_names.append("amount_log1p")
+        print(f"  [CreditCard] Amount -> log1p(Amount)")
+
+    X = np.hstack(features).astype(np.float32)
+    y = y.astype(np.int8)
+
+    n_v = sum(1 for n in feat_names if n.startswith("V"))
+    n_eng = len(feat_names) - n_v
+    print(f"  [CreditCard] Features: {n_v} PCA (V1-V28) + {n_eng} engenheiradas "
+          f"= {X.shape[1]} total")
+
+    log_preprocessing_summary((X_raw.shape[0], len(col_names)), X.shape, "CreditCard")
+
+    np.save(x_path, X)
+    np.save(y_path, y)
+
+    n_fraud = int(y.sum())
+    n_total = len(y)
+    print(f"[CreditCard] Salvo: {x_path} -- {X.shape} "
+          f"({X.nbytes/1024/1024:.1f} MB)")
+    print(f"[CreditCard] Salvo: {y_path} -- {y.shape} ({y.nbytes/1024:.0f} KB)")
+    print(f"[CreditCard] Distribuicao: legitimas = {n_total - n_fraud:,} "
+          f"({(n_total - n_fraud)/n_total*100:.2f}%) | "
+          f"fraudes = {n_fraud:,} ({n_fraud/n_total*100:.3f}%)")
+    elapsed = time.time() - t0
+    print(f"[CreditCard] Tempo total: {elapsed:.0f}s")
+    return True
+
+
+# ======================================================================
+# MNIST (70k amostras, 784 features -> ~443 apos preprocessing)
+# ======================================================================
+
+MNIST_VARIANCE_THRESHOLD = 0.01  # remove pixels quase constantes
+
+
+def prepare_mnist():
+    """
+    Pre-processa MNIST via sklearn.datasets.fetch_openml.
+
+    Classificacao binaria: digitos 0-4 (classe 0) vs 5-9 (classe 1).
+
+    Preprocessing (tudo data-independent, compativel com FL):
+      1. Normalizacao [0, 1] (divisao por 255)
+      2. Conversao para float32
+      3. Remocao de pixels constantes (bordas sempre pretas)
+      4. Remocao de features com variancia < MNIST_VARIANCE_THRESHOLD
+      5. Binarizacao das labels: 0-4 → 0, 5-9 → 1
+    """
+    from sklearn.datasets import fetch_openml
+
+    d = data_dir("mnist")
+    os.makedirs(d, exist_ok=True)
+
+    x_path, y_path = npy_paths("mnist")
+
+    print("[MNIST] Baixando dataset via OpenML (mnist_784)...")
+    print("[MNIST] Isso pode levar alguns minutos na primeira vez...")
+    t0 = time.time()
+
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
+    X_raw = mnist.data.astype(np.float32)
+    y_raw = mnist.target.astype(int)
+
+    print(f"[MNIST] {X_raw.shape[0]:,} amostras carregadas em {time.time()-t0:.0f}s")
+    print(f"  Shape original: {X_raw.shape}")
+    original_shape = X_raw.shape
+
+    # 1. Normalizacao [0, 1]
+    X = X_raw / 255.0
+    print(f"  [MNIST] Normalizado para [0, 1] (divisao por 255)")
+
+    # 2. Remocao de features constantes (pixels de borda sempre pretos)
+    X, const_mask = remove_constant_features(X, threshold=0.0, label="MNIST")
+
+    # 3. Remocao de features com variancia muito baixa
+    # Pixels quase constantes nao ajudam gradient boosting (splits inuteis)
+    variances = np.var(X, axis=0)
+    var_mask = variances >= MNIST_VARIANCE_THRESHOLD
+    n_removed_var = X.shape[1] - var_mask.sum()
+    if n_removed_var > 0:
+        X = X[:, var_mask]
+        print(f"  [MNIST] Removidas {n_removed_var} features com variancia "
+              f"< {MNIST_VARIANCE_THRESHOLD} ({X.shape[1]} restantes)")
+
+    # 4. Binarizacao das labels: 0-4 → classe 0, 5-9 → classe 1
+    y = (y_raw >= 5).astype(np.int8)
+
+    log_preprocessing_summary(original_shape, X.shape, "MNIST")
+
+    np.save(x_path, X)
+    np.save(y_path, y)
+
+    print(f"[MNIST] Salvo: {x_path} — {X.shape} ({X.nbytes/1024/1024:.1f} MB)")
+    print(f"[MNIST] Salvo: {y_path} — {y.shape} ({y.nbytes/1024:.0f} KB)")
+    print(f"[MNIST] Distribuicao: classe 0 (digitos 0-4) = {(y==0).sum():,} "
+          f"({(y==0).mean()*100:.1f}%) | "
+          f"classe 1 (digitos 5-9) = {(y==1).sum():,} "
+          f"({(y==1).mean()*100:.1f}%)")
+    elapsed = time.time() - t0
+    print(f"[MNIST] Tempo total: {elapsed:.0f}s")
+    return True
+
+
+# ======================================================================
 # Avazu (40M amostras, features categoricas)
 # ======================================================================
 
@@ -471,6 +664,8 @@ def prepare_avazu(_max_rows=None):
 PREPARERS = {
     "higgs_full": prepare_higgs_full,
     "epsilon": prepare_epsilon,
+    "creditcard": prepare_creditcard,
+    "mnist": prepare_mnist,
     "avazu": prepare_avazu,
 }
 

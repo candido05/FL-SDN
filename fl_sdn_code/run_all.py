@@ -39,7 +39,7 @@ from config import NUM_CLIENTS, NUM_ROUNDS, LOCAL_EPOCHS, CLIENT_CONNECT_ADDRESS
 
 ALL_MODELS = ["xgboost", "lightgbm", "catboost"]
 ALL_STRATEGIES = ["bagging", "cycling", "sdn-bagging", "sdn-cycling"]
-ALL_DATASETS = ["higgs", "higgs_full", "epsilon", "avazu"]
+ALL_DATASETS = ["higgs", "higgs_full", "epsilon", "avazu", "mnist", "creditcard"]
 
 # Diretorio para salvar resultados do grid search
 TUNED_DIR = os.path.join(os.path.dirname(__file__), "tuned_params")

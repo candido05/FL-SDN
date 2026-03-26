@@ -43,7 +43,7 @@ def main():
     parser.add_argument("--strategy", type=str, required=True,
                         choices=["bagging", "cycling", "sdn-bagging", "sdn-cycling"])
     parser.add_argument("--dataset", type=str, default="higgs",
-                        choices=["higgs", "higgs_full", "epsilon", "avazu"],
+                        choices=["higgs", "higgs_full", "epsilon", "avazu", "mnist", "creditcard"],
                         help="Dataset a utilizar (default: higgs)")
     args = parser.parse_args()
 

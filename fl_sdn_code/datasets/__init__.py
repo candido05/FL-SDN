@@ -19,3 +19,5 @@ import datasets.higgs
 import datasets.higgs_full
 import datasets.epsilon
 import datasets.avazu
+import datasets.mnist
+import datasets.creditcard

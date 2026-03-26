@@ -183,7 +183,7 @@ def main():
     parser.add_argument("--model", type=str, required=True,
                         choices=["xgboost", "lightgbm", "catboost"])
     parser.add_argument("--dataset", type=str, default="higgs",
-                        choices=["higgs", "higgs_full", "epsilon", "avazu"],
+                        choices=["higgs", "higgs_full", "epsilon", "avazu", "mnist", "creditcard"],
                         help="Dataset a utilizar (default: higgs)")
     args = parser.parse_args()
 

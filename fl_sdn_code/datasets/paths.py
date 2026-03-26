@@ -13,6 +13,13 @@ Estrutura esperada:
     │   ├── HIGGS.csv.gz         (11M amostras, baixar de UCI)
     │   ├── higgs_full_X.npy     (gerado por prepare_datasets.py)
     │   └── higgs_full_y.npy     (gerado por prepare_datasets.py)
+    ├── mnist/
+    │   ├── mnist_X.npy          (gerado por prepare_datasets.py, ~443 features)
+    │   └── mnist_y.npy          (gerado por prepare_datasets.py, binario 0-4 vs 5-9)
+    ├── creditcard/
+    │   ├── creditcard.csv       (opcional, baixar do Kaggle; senao usa OpenML)
+    │   ├── creditcard_X.npy     (gerado por prepare_datasets.py, 31 features)
+    │   └── creditcard_y.npy     (gerado por prepare_datasets.py)
     ├── epsilon/
     │   ├── epsilon_normalized.bz2       (treino, baixar de LIBSVM)
     │   ├── epsilon_normalized.t.bz2     (teste, baixar de LIBSVM)
@@ -85,6 +92,31 @@ DATASET_INFO = {
             "Remocao de features constantes",
             "Selecao por variancia (top 500)",
             "Remocao de features com correlacao >= 0.95",
+        ],
+    },
+    "creditcard": {
+        "description": "Credit Card Fraud (285k) — 28 PCA + 3 engenheiradas, desbalanceado 0.17%",
+        "features": "30 -> 31 (V1-V28 + hour_sin/cos + amount_log1p)",
+        "task": "binary",
+        "source": "ULB via OpenML (data_id=1597) ou Kaggle",
+        "url": "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud",
+        "preprocessing": [
+            "Remocao da coluna Time (sequencial, sem sentido em FL)",
+            "Criacao de hour_sin/hour_cos (ciclo 24h, data-independent)",
+            "Amount normalizado via log1p (data-independent)",
+            "V1-V28 mantidas como estao (ja PCA-normalizadas pela ULB)",
+        ],
+    },
+    "mnist": {
+        "description": "MNIST (70k) — digitos 0-4 vs 5-9, ~580 features apos selecao",
+        "features": "784 → ~580 (remocao de pixels constantes e baixa variancia)",
+        "task": "binary",
+        "source": "OpenML (mnist_784 v1)",
+        "preprocessing": [
+            "Normalizacao [0, 1] (divisao por 255)",
+            "Remocao de pixels constantes (bordas sempre pretas)",
+            "Remocao de features com variancia < 0.01",
+            "Labels binarizadas: 0-4 → classe 0, 5-9 → classe 1",
         ],
     },
     "avazu": {
