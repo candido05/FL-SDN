@@ -209,8 +209,11 @@ __marimo__/
 CLAUDE.md
 
 # Dados do dataset (grandes, nao versionar)
+fl_sdn_code/data/*
 fl_sdn_code/data/**/*.npy
 fl_sdn_code/data/*.npy
+fl_sdn_code/data/**/*.
+fl_sdn_code/data/*.gz
 
 # CatBoost cache
 catboost_info/

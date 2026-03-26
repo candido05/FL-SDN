@@ -29,14 +29,14 @@ SDN_CLIENT_IPS = {
 }
 
 # Categorias de clientes (usadas para QoS/priorizacao de trafego SDN)
-# Todos treinam com o mesmo numero de epocas (LOCAL_EPOCHS)
+# Todos os clientes sao do mesmo nivel — sem diferenciacao de categoria
 CLIENT_CATEGORIES = {
     0: "cat1",  # FL-Node-1
     1: "cat1",  # FL-Node-5
-    2: "cat2",  # FL-Node-2
-    3: "cat2",  # FL-Node-4
-    4: "cat3",  # FL-Node-3
-    5: "cat3",  # FL-Node-6
+    2: "cat1",  # FL-Node-2
+    3: "cat1",  # FL-Node-4
+    4: "cat1",  # FL-Node-3
+    5: "cat1",  # FL-Node-6
 }
 
 
@@ -57,7 +57,7 @@ SERVER_ADDRESS = f"{SERVER_HOST}:{SERVER_PORT}"
 # ---------------------------------------------------------------------------
 #NUM_CLIENTS = 3                # Numero de clientes federados
 NUM_ROUNDS = 20                 # Rounds de comunicacao servidor-clientes
-LOCAL_EPOCHS = 100             # Numero de estimadores/iteracoes por treino local
+LOCAL_EPOCHS = 50              # Numero de estimadores/iteracoes por treino local
                                # (n_estimators para XGBoost/LightGBM, iterations para CatBoost)
 LOG_EVERY = 10                 # Mostrar progresso a cada N epocas locais
 
@@ -120,23 +120,21 @@ VALIDATION_SPLIT = 0.15            # Fracao do treino local reservada para valid
 # Decaimento exponencial por round (server_round comecando em 1):
 #   valor_round = max(piso, base * decay_rate ^ (server_round - 1))
 #
-# Tabela de exemplo (LOCAL_EPOCHS=100, learning_rate=0.10, NUM_ROUNDS=20):
+# Tabela de exemplo (LOCAL_EPOCHS=50, learning_rate=0.10, NUM_ROUNDS=20):
 #
 #  Round | n_new  | n_ratio | lr     | Observacao
 #  ------+--------+---------+--------+------------------------------
-#    1   |  100   |  100%   | 0.100  | sem warm start
-#    2   |   85   |   85%   | 0.093  | primeiro warm start
-#    3   |   72   |   72%   | 0.086  |
-#    4   |   61   |   61%   | 0.080  |
-#    5   |   52   |   52%   | 0.075  |
-#    6   |   44   |   44%   | 0.069  |
-#    7   |   37   |   37%   | 0.064  |
-#    8   |   32   |   32%   | 0.060  |
-#    9   |   30   |   30%   | 0.056  | piso de n_estimators atingido
-#   10   |   30   |   30%   | 0.052  |
-#   12   |   30   |   30%   | 0.046  |
-#   15   |   30   |   30%   | 0.040  | piso de lr atingido
-#   20   |   30   |   30%   | 0.040  | estabilizado
+#    1   |   50   |  100%   | 0.100  | sem warm start
+#    2   |   43   |   85%   | 0.093  | primeiro warm start
+#    3   |   36   |   72%   | 0.086  |
+#    4   |   31   |   61%   | 0.080  |
+#    5   |   26   |   52%   | 0.075  |
+#    6   |   15   |   30%   | 0.069  | piso de n_estimators atingido
+#    7   |   15   |   30%   | 0.064  |
+#    9   |   15   |   30%   | 0.056  |
+#   12   |   15   |   30%   | 0.046  |
+#   15   |   15   |   30%   | 0.040  | piso de lr atingido
+#   20   |   15   |   30%   | 0.040  | estabilizado
 #
 # O piso garante que o modelo continue aprendendo dos dados locais.
 
@@ -176,8 +174,7 @@ SDN_ADAPTIVE_EPOCHS = False
 
 # Limiares de elegibilidade de clientes
 # Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps = 15 Mbps)
-SDN_MIN_BANDWIDTH_MBPS = 15.0
-#SDN_MIN_BANDWIDTH_MBPS = 10.0  # valor anterior (topologia antiga 100 Mbps)
+SDN_MIN_BANDWIDTH_MBPS = 15.0  # Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps)
 SDN_MAX_LATENCY_MS     = 50.0   # Latencia maxima aceita
 SDN_MAX_PACKET_LOSS    = 0.10   # Perda de pacotes maxima (10%)
 

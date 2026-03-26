@@ -81,6 +81,48 @@ def post(endpoint: str, body: dict, timeout: int = 5) -> Optional[dict]:
         return None
 
 
+def fl_round_start(round_num: int) -> Optional[dict]:
+    """
+    Notifica o SDN Orchestrator sobre o inicio de um round FL.
+
+    O orquestrador abre um CSV dedicado ao round (fl_metrics_round{N}_*.csv)
+    e passa a escrever nele cada ciclo SDN enquanto a sessao estiver ativa.
+
+    Retorna o JSON de resposta ou None se indisponivel/mock.
+    """
+    if not is_available():
+        print(f"  [SDN] [mock] fl/training/start round={round_num}")
+        return None
+    result = post("/fl/training/start", {"round": round_num})
+    if result:
+        csv_path = result.get("csv_path", "—")
+        print(f"  [SDN] Round {round_num} iniciado → CSV: {csv_path}")
+    else:
+        print(f"  [SDN] AVISO: fl/training/start falhou (round {round_num})")
+    return result
+
+
+def fl_round_stop() -> Optional[dict]:
+    """
+    Notifica o SDN Orchestrator sobre o fim do round FL em curso.
+
+    O orquestrador fecha o CSV do round e registra a duracao total.
+
+    Retorna o JSON de resposta ou None se indisponivel/mock.
+    """
+    if not is_available():
+        print(f"  [SDN] [mock] fl/training/stop")
+        return None
+    result = post("/fl/training/stop", {})
+    if result:
+        duration = result.get("duration_sec", "—")
+        round_num = result.get("round", "—")
+        print(f"  [SDN] Round {round_num} encerrado | duracao: {duration}s")
+    else:
+        print(f"  [SDN] AVISO: fl/training/stop falhou")
+    return result
+
+
 def delete(endpoint: str, timeout: int = 5) -> bool:
     """
     DELETE request ao SDN Orchestrator.

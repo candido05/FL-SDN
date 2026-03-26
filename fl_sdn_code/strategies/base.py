@@ -110,14 +110,11 @@ class BaseStrategy(Strategy):
         Chamado pelas subclasses no aggregate_fit() para popular
         self._last_resource_metrics antes do evaluate().
         """
-        times, sizes, cpus, rams, ram_peaks = [], [], [], [], []
+        times, sizes = [], []
         for _, fit_res in results:
             m = fit_res.metrics
             times.append(m.get("training_time", 0))
             sizes.append(m.get("model_size_kb", 0))
-            cpus.append(m.get("cpu_percent", 0))
-            rams.append(m.get("ram_mb", 0))
-            ram_peaks.append(m.get("ram_peak_mb", 0))
 
         def _avg(lst):
             return sum(lst) / len(lst) if lst else 0.0
@@ -125,9 +122,6 @@ class BaseStrategy(Strategy):
         self._last_resource_metrics = {
             "training_time_avg": _avg(times),
             "model_size_kb_avg": _avg(sizes),
-            "cpu_percent_avg": _avg(cpus),
-            "ram_mb_avg": _avg(rams),
-            "ram_peak_mb_max": max(ram_peaks) if ram_peaks else 0.0,
         }
         return self._last_resource_metrics
 

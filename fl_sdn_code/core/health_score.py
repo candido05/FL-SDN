@@ -3,7 +3,7 @@ Client Health Score — sistema de pontuacao dinamica para selecao/exclusao de c
 
 Combina 3 dimensoes em um score unico (0.0 a 1.0):
   1. Contribuicao ao modelo (accuracy delta, qualidade relativa)
-  2. Eficiencia de recursos (tempo, CPU, RAM)
+  2. Eficiencia de tempo (training_time)
   3. Qualidade de rede (bandwidth, latencia, perda)
 
 Os pesos de cada dimensao sao configuraveis via HEALTH_SCORE_PROFILE no config.py,
@@ -140,8 +140,8 @@ class ClientHealthTracker:
 
         Args:
             server_round: Numero do round atual.
-            client_results: {cid: {accuracy, f1, training_time, cpu_percent,
-                            ram_mb, model_size_kb, ...}} — metricas do FitRes.
+            client_results: {cid: {accuracy, f1, training_time,
+                            model_size_kb, ...}} — metricas do FitRes.
             net_metrics: {cid: {bandwidth_mbps, latency_ms, packet_loss, ...}}.
             net_scores: {cid: efficiency_score} do network.py.
             ensemble_accuracy: Accuracy do ensemble COM todos os clientes.
@@ -164,8 +164,6 @@ class ClientHealthTracker:
                 "accuracy": metrics.get("accuracy", 0),
                 "f1": metrics.get("f1", 0),
                 "training_time": metrics.get("training_time", 0),
-                "cpu_percent": metrics.get("cpu_percent", 0),
-                "ram_mb": metrics.get("ram_mb", 0),
                 "model_size_kb": metrics.get("model_size_kb", 0),
                 "net_score": net_scores.get(cid, 0.5),
             })
@@ -298,38 +296,22 @@ class ClientHealthTracker:
         self, cid: int, client_results: Dict[int, Dict],
     ) -> float:
         """
-        Score de eficiencia de recursos (0-1). Menos consumo = melhor.
+        Score de eficiencia de tempo (0-1). Treinamento mais rapido = melhor.
 
-        Componentes:
+        Componente:
         - tempo de treino relativo (mais rapido = melhor)
-        - consumo de CPU relativo (menos = melhor)
-        - consumo de RAM relativo (menos = melhor)
         """
         results = client_results
         cids = list(results.keys())
         if not cids:
             return 0.5
 
-        my = results[cid]
-        my_time = my.get("training_time", 0)
-        my_cpu = my.get("cpu_percent", 0)
-        my_ram = my.get("ram_mb", 0)
-
+        my_time = results[cid].get("training_time", 0)
         all_times = [results[c].get("training_time", 0) for c in cids]
-        all_cpus = [results[c].get("cpu_percent", 0) for c in cids]
-        all_rams = [results[c].get("ram_mb", 0) for c in cids]
-
         max_time = max(all_times) if all_times else 1
-        max_cpu = max(all_cpus) if all_cpus else 1
-        max_ram = max(all_rams) if all_rams else 1
 
-        # Invertido: menor consumo = score maior
         time_score = 1.0 - (my_time / max_time) if max_time > 0 else 0.5
-        cpu_score = 1.0 - (my_cpu / max_cpu) if max_cpu > 0 else 0.5
-        ram_score = 1.0 - (my_ram / max_ram) if max_ram > 0 else 0.5
-
-        score = 0.50 * time_score + 0.25 * cpu_score + 0.25 * ram_score
-        return max(0.0, min(1.0, score))
+        return max(0.0, min(1.0, time_score))
 
     def _compute_network_score(
         self,

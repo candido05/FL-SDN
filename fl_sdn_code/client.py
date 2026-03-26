@@ -42,7 +42,6 @@ from config import (
     CLIENT_CATEGORIES, TUNED_PARAMS,
 )
 from core.metrics import compute_all_metrics, print_metrics_table
-from core.resources import ResourceMonitor
 from core.serialization import serialize_model
 from datasets import DatasetRegistry
 from models.factory import ModelFactory
@@ -110,9 +109,6 @@ class SimpleClient(fl.client.Client):
             except Exception as e:
                 print(f"    [Cliente {self.client_id}] Falha no warm start: {e}")
 
-        resource_monitor = ResourceMonitor()
-        resource_monitor.start()
-
         t0 = time.time()
         self.model = ModelFactory.train(
             self.model_type, self.X_train, self.y_train,
@@ -120,8 +116,6 @@ class SimpleClient(fl.client.Client):
             extra_params=self.extra_params,
         )
         elapsed = time.time() - t0
-
-        resource_stats = resource_monitor.stop()
 
         y_prob = self.model.predict_proba(self.X_test)[:, 1]
         y_pred = (y_prob >= 0.5).astype(int)
@@ -133,10 +127,6 @@ class SimpleClient(fl.client.Client):
 
         print(f"\n  [Cliente {self.client_id}] FIM Round {server_round} | "
               f"Tempo: {elapsed:.1f}s | Modelo: {model_size_kb:.1f} KB")
-        print(f"    CPU: {resource_stats['cpu_percent']:.1f}% | "
-              f"RAM: {resource_stats['ram_mb']:.1f} MB "
-              f"(pico: {resource_stats['ram_peak_mb']:.1f} MB, "
-              f"{resource_stats['ram_percent']:.1f}%)")
         print_metrics_table(
             f"[Cliente {self.client_id}] Metricas no teste:", metrics,
         )
@@ -151,9 +141,6 @@ class SimpleClient(fl.client.Client):
             "local_epochs": round_epochs,
             "training_time": float(elapsed),
             "model_size_kb": float(model_size_kb),
-            "cpu_percent": float(resource_stats["cpu_percent"]),
-            "ram_mb": float(resource_stats["ram_mb"]),
-            "ram_peak_mb": float(resource_stats["ram_peak_mb"]),
         }
         for k, v in metrics.items():
             if not k.startswith("_"):

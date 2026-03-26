@@ -20,7 +20,6 @@ from core.metrics import CSV_METRIC_FIELDS
 # Campos de recursos e rede agregados por round
 RESOURCE_FIELDS = [
     "training_time_avg", "model_size_kb_avg",
-    "cpu_percent_avg", "ram_mb_avg", "ram_peak_mb_max",
 ]
 
 NETWORK_FIELDS = [
@@ -101,9 +100,8 @@ class CSVLogger:
               f"auc={row['auc']:.4f} | mcc={row['mcc']:.4f} | "
               f"kappa={row['cohen_kappa']:.4f}")
         if rm:
-            print(f"        CPU={row['cpu_percent_avg']:.1f}% | "
-                  f"RAM={row['ram_mb_avg']:.1f}MB | "
-                  f"Tempo={row['training_time_avg']:.1f}s")
+            print(f"        Tempo={row['training_time_avg']:.1f}s | "
+                  f"Modelo={row['model_size_kb_avg']:.1f}KB")
         if nm:
             print(f"        BW={row['bandwidth_mbps_avg']:.1f}Mbps | "
                   f"Lat={row['latency_ms_avg']:.1f}ms | "

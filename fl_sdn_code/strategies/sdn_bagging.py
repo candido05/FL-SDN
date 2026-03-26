@@ -23,6 +23,7 @@ from core.csv_logger import CSVLogger, SDNMetricsLogger
 from core.health_score import ClientHealthTracker, compute_leave_one_out
 from sdn.network import get_network_metrics, filter_eligible_clients, adapt_local_epochs
 from sdn.qos import apply_qos_policy, remove_qos_policies
+from sdn.controller import fl_round_start, fl_round_stop
 from strategies.base import BaseStrategy
 
 
@@ -99,6 +100,8 @@ class SDNBagging(BaseStrategy):
         print(f"# Aguardando {self.num_clients} cliente(s)...")
         print(f"{'#'*60}")
         sys.stdout.flush()
+
+        fl_round_start(server_round)
 
         clients = client_manager.sample(
             num_clients=self.num_clients,
@@ -276,8 +279,6 @@ class SDNBagging(BaseStrategy):
                     "accuracy": fit_res.metrics.get("accuracy", 0),
                     "f1": fit_res.metrics.get("f1", 0),
                     "training_time": fit_res.metrics.get("training_time", 0),
-                    "cpu_percent": fit_res.metrics.get("cpu_percent", 0),
-                    "ram_mb": fit_res.metrics.get("ram_mb", 0),
                     "model_size_kb": fit_res.metrics.get("model_size_kb", 0),
                 }
 
@@ -308,5 +309,6 @@ class SDNBagging(BaseStrategy):
             if self._sdn_logger:
                 self._sdn_logger.log_health_scores(server_round, scores)
 
+        fl_round_stop()
         sys.stdout.flush()
         return None, {"num_models": len(self.client_models)}

@@ -108,11 +108,16 @@ def log_preprocessing_summary(X_original_shape, X_final_shape, label=""):
           f"({n_final:,} amostras)")
 
 
+# Constantes configuráveis (e patcháveis em testes unitários)
+AVAZU_MAX_ROWS = 2_000_000   # máx. amostras Avazu; aumente se tiver mais RAM/disco
+HIGGS_CHUNK_SIZE = 500_000   # linhas por chunk na leitura do HIGGS
+
+
 # ======================================================================
 # HIGGS Full (11M amostras, 28 features)
 # ======================================================================
 
-def prepare_higgs_full():
+def prepare_higgs_full(_chunk_size=None):
     """
     Pre-processa HIGGS.csv.gz do UCI ML Repository.
 
@@ -144,11 +149,21 @@ def prepare_higgs_full():
     t0 = time.time()
 
     chunks = []
-    chunk_size = 500_000
-    for i, chunk in enumerate(pd.read_csv(raw_file, header=None, chunksize=chunk_size)):
-        chunks.append(chunk.values)
-        loaded = (i + 1) * chunk_size
-        print(f"  Lido: {loaded:,} linhas...", end="\r")
+    chunk_size = _chunk_size if _chunk_size is not None else HIGGS_CHUNK_SIZE
+    try:
+        for i, chunk in enumerate(pd.read_csv(raw_file, header=None, chunksize=chunk_size)):
+            chunks.append(chunk.values)
+            loaded = (i + 1) * chunk_size
+            print(f"  Lido: ~{min(loaded, 11_000_000):,} linhas...", end="\r")
+    except EOFError:
+        print(f"\n[HIGGS Full] AVISO: arquivo truncado/incompleto.")
+        print(f"  Usando {len(chunks)} chunks completos lidos ate o erro.")
+        print(f"  Para o dataset completo, rebaixe HIGGS.csv.gz do UCI (2.62 GB).")
+
+    if not chunks:
+        print("[HIGGS Full] ERRO: nenhum chunk completo foi lido. "
+              "Arquivo pode estar corrompido ou muito severamente truncado.")
+        return False
 
     data = np.vstack(chunks)
     print(f"\n[HIGGS Full] {data.shape[0]:,} amostras carregadas em {time.time()-t0:.0f}s")
@@ -304,7 +319,7 @@ def prepare_epsilon():
 # Avazu (40M amostras, features categoricas)
 # ======================================================================
 
-def prepare_avazu():
+def prepare_avazu(_max_rows=None):
     """
     Pre-processa Avazu CTR dataset do Kaggle.
 
@@ -317,9 +332,18 @@ def prepare_avazu():
 
     NOTA: Frequency Encoding NAO e usado pois exige passada global
     sobre todos os dados, violando a premissa de FL.
+
+    NOTA DE MEMORIA: o dataset completo (40M amostras x 1029 features x float32)
+    ocuparia ~164 GB em RAM. Por isso, usa escrita incremental via memmap e
+    limita a AVAZU_MAX_ROWS amostras. Aumente a constante se tiver mais RAM/disco.
+
+    Args:
+        _max_rows: sobreescreve AVAZU_MAX_ROWS (uso interno/testes).
     """
     import pandas as pd
     from sklearn.feature_extraction import FeatureHasher
+
+    MAX_ROWS = _max_rows if _max_rows is not None else AVAZU_MAX_ROWS
 
     d = data_dir("avazu")
 
@@ -341,11 +365,14 @@ def prepare_avazu():
         print(f"\n  Baixe de: {DATASET_INFO['avazu']['url']}")
         return False
 
-    print(f"[Avazu] Lendo {raw_file}...")
-    print(f"[Avazu] Isso pode levar varios minutos (40M linhas)...")
+    n_hash_features = 1024
+    n_temporal = 5
+    n_features = n_temporal + n_hash_features  # 1029
+
+    print(f"[Avazu] Lendo {raw_file} (limitado a {MAX_ROWS:,} amostras)...")
+    print(f"[Avazu] Escrita incremental via memmap — sem vstack em RAM.")
     t0 = time.time()
 
-    n_hash_features = 1024
     hasher = FeatureHasher(n_features=n_hash_features, input_type="string")
 
     cat_cols = [
@@ -357,12 +384,25 @@ def prepare_avazu():
         "C14", "C15", "C16", "C17", "C18", "C19", "C20", "C21",
     ]
 
-    X_chunks = []
-    y_chunks = []
-    total_rows = 0
-    chunk_size = 1_000_000
+    x_path, y_path = npy_paths("avazu")
+    os.makedirs(os.path.dirname(x_path), exist_ok=True)
+
+    # Pre-aloca arquivos .npy via memmap — escrita direta sem acumular na RAM
+    X_mm = np.lib.format.open_memmap(
+        x_path, mode="w+", dtype=np.float32, shape=(MAX_ROWS, n_features),
+    )
+    y_mm = np.lib.format.open_memmap(
+        y_path, mode="w+", dtype=np.int8, shape=(MAX_ROWS,),
+    )
+
+    row_offset = 0
+    chunk_size = 500_000
+    y_sum = 0
 
     for chunk in pd.read_csv(raw_file, chunksize=chunk_size):
+        if row_offset >= MAX_ROWS:
+            break
+
         y_chunk = chunk["click"].values.astype(np.int8)
 
         # Features temporais (data-independent)
@@ -392,29 +432,33 @@ def prepare_avazu():
 
         X_chunk = np.hstack([temporal_features, X_hashed])
 
-        X_chunks.append(X_chunk)
-        y_chunks.append(y_chunk)
-        total_rows += len(chunk)
-        print(f"  Processado: {total_rows:,} linhas...", end="\r")
+        n_take = min(len(X_chunk), MAX_ROWS - row_offset)
+        X_mm[row_offset:row_offset + n_take] = X_chunk[:n_take]
+        y_mm[row_offset:row_offset + n_take] = y_chunk[:n_take]
+        y_sum += int(y_chunk[:n_take].sum())
+        row_offset += n_take
+        print(f"  Processado: {row_offset:,}/{MAX_ROWS:,} linhas...", end="\r")
 
-    X = np.vstack(X_chunks)
-    y = np.concatenate(y_chunks)
+    del X_mm, y_mm  # flush para disco
 
-    n_temporal = 5
-    print(f"\n[Avazu] {X.shape[0]:,} amostras processadas em {time.time()-t0:.0f}s")
+    total_rows = row_offset
+
+    # Se o CSV tinha menos linhas que MAX_ROWS, o memmap foi pre-alocado
+    # maior que o necessario (com zeros no final). Trunca para o tamanho real.
+    if total_rows < MAX_ROWS:
+        X_partial = np.load(x_path, mmap_mode="r")[:total_rows].copy()
+        y_partial = np.load(y_path, mmap_mode="r")[:total_rows].copy()
+        np.save(x_path, X_partial)
+        np.save(y_path, y_partial)
+
+    print(f"\n[Avazu] {total_rows:,} amostras salvas em {time.time()-t0:.0f}s")
     print(f"  Features: {n_temporal} temporais + "
-          f"{n_hash_features} hashed = {X.shape[1]} total")
+          f"{n_hash_features} hashed = {n_features} total")
     print(f"  Todas as features sao data-independent (compativel com FL)")
-    print(f"  Desbalanceamento: click=0 = {(y==0).sum():,} ({(y==0).mean()*100:.1f}%) | "
-          f"click=1 = {(y==1).sum():,} ({(y==1).mean()*100:.1f}%)")
-
-    x_path, y_path = npy_paths("avazu")
-    os.makedirs(os.path.dirname(x_path), exist_ok=True)
-    np.save(x_path, X)
-    np.save(y_path, y)
-
-    print(f"[Avazu] Salvo: {x_path} — {X.shape} ({X.nbytes/1024/1024:.0f} MB)")
-    print(f"[Avazu] Salvo: {y_path} — {y.shape} ({y.nbytes/1024:.0f} KB)")
+    size_mb = total_rows * n_features * 4 / 1024 / 1024
+    print(f"  Desbalanceamento: click=0 = {total_rows - y_sum:,} | "
+          f"click=1 = {y_sum:,} ({y_sum/total_rows*100:.1f}%)")
+    print(f"[Avazu] Salvo: {x_path} — ({total_rows}, {n_features}) ({size_mb:.0f} MB)")
     elapsed = time.time() - t0
     print(f"[Avazu] Tempo total: {elapsed:.0f}s")
     return True

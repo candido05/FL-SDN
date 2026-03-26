@@ -23,6 +23,7 @@ from core.csv_logger import CSVLogger, SDNMetricsLogger
 from core.health_score import ClientHealthTracker
 from sdn.network import get_network_metrics, filter_eligible_clients, adapt_local_epochs
 from sdn.qos import apply_qos_policy, remove_qos_policies
+from sdn.controller import fl_round_start, fl_round_stop
 from strategies.base import BaseStrategy
 
 
@@ -86,6 +87,8 @@ class SDNCycling(BaseStrategy):
         print(f"# Aguardando {self.num_clients} cliente(s)...")
         print(f"{'#'*60}")
         sys.stdout.flush()
+
+        fl_round_start(server_round)
 
         clients = client_manager.sample(
             num_clients=self.num_clients,
@@ -221,8 +224,6 @@ class SDNCycling(BaseStrategy):
                     "accuracy": acc,
                     "f1": f1,
                     "training_time": t,
-                    "cpu_percent": fit_res.metrics.get("cpu_percent", 0),
-                    "ram_mb": fit_res.metrics.get("ram_mb", 0),
                     "model_size_kb": sz,
                 },
             }
@@ -245,4 +246,5 @@ class SDNCycling(BaseStrategy):
             if self._sdn_logger:
                 self._sdn_logger.log_health_scores(server_round, scores)
 
+        fl_round_stop()
         return None, {"trained_client": cid}

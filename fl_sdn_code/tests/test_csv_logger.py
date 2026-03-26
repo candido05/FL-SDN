@@ -41,7 +41,7 @@ class TestCSVLogger:
 
         with open(logger.log_file) as f:
             reader = csv.DictReader(f)
-            assert len(reader.fieldnames) == 24
+            assert len(reader.fieldnames) == 21
 
     def test_multiple_rounds(self, tmp_run_dir):
         logger = CSVLogger(tmp_run_dir, exp_name="test")
@@ -65,17 +65,14 @@ class TestCSVLogger:
         resource = {
             "training_time_avg": 15.3,
             "model_size_kb_avg": 120.5,
-            "cpu_percent_avg": 45.2,
-            "ram_mb_avg": 350.0,
-            "ram_peak_mb_max": 500.0,
         }
         logger.log_round(1, metrics, resource_metrics=resource)
 
         with open(logger.log_file) as f:
             reader = csv.DictReader(f)
             row = list(reader)[0]
-        assert float(row["cpu_percent_avg"]) == 45.2
-        assert float(row["ram_mb_avg"]) == 350.0
+        assert float(row["training_time_avg"]) == 15.3
+        assert float(row["model_size_kb_avg"]) == 120.5
 
     def test_network_metrics_logged(self, tmp_run_dir):
         logger = CSVLogger(tmp_run_dir, exp_name="test")

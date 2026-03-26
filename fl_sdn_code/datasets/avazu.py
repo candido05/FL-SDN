@@ -38,16 +38,22 @@ def load(role: str, client_id: int = 0, **kwargs):
         sys.exit(1)
 
     x_path, y_path = npy_paths("avazu")
-    X = np.load(x_path)
-    y = np.load(y_path).astype(int)
+    # mmap_mode='r': abre o .npy sem carregar tudo na RAM (arquivo pode ser grande)
+    X = np.load(x_path, mmap_mode="r")
+    y = np.load(y_path, mmap_mode="r")
 
-    # Subconjunto opcional para testes rapidos
-    max_samples = kwargs.get("max_samples", len(X))
+    # Avazu pode ser grande — sempre subamostrar para caber em RAM
+    # Padrao: 500k amostras; passe max_samples=N para ajustar
+    default_max = 500_000
+    max_samples = kwargs.get("max_samples", default_max)
     if max_samples < len(X):
         rng = np.random.RandomState(RANDOM_SEED)
         idx = rng.choice(len(X), size=max_samples, replace=False)
-        X = X[idx]
-        y = y[idx]
+        X = np.array(X[idx], dtype=np.float32)
+        y = np.array(y[idx]).astype(int)
+    else:
+        X = np.array(X, dtype=np.float32)
+        y = np.array(y).astype(int)
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=TEST_SIZE, random_state=RANDOM_SEED, stratify=y,
