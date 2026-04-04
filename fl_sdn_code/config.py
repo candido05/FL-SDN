@@ -172,6 +172,9 @@ SDN_MOCK_MODE = False
 SDN_ADAPTIVE_EPOCHS = False
 #SDN_ADAPTIVE_EPOCHS = True   # descomentar se quiser adaptacao por rede
 
+# Capacidade maxima fisica dos enlaces (tc tbf nos switches)
+SDN_MAX_LINK_CAPACITY_MBPS = 20.0  # limite fisico: tc tbf, largura real 10-17 Mbps sob congestionamento
+
 # Limiares de elegibilidade de clientes
 # Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps = 15 Mbps)
 SDN_MIN_BANDWIDTH_MBPS = 15.0  # Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps)
@@ -219,3 +222,16 @@ HEALTH_SCORE_THRESHOLD = 0.50
 # True = ativa exclusao dinamica nas estrategias SDN
 # False = comportamento original (sem exclusao)
 HEALTH_SCORE_ENABLED = True
+
+# ---------------------------------------------------------------------------
+# Piso de clientes elegiveis — evita rounds com 1 cliente
+# ---------------------------------------------------------------------------
+# Em rounds de alto congestionamento, o filtro de bandwidth pode deixar menos
+# de SDN_MIN_ELIGIBLE_CLIENTS clientes elegiveis. Quando isso ocorre,
+# filter_eligible_clients() admite os melhores clientes rejeitados (ordenados
+# por bandwidth descendente) ate atingir este piso.
+#
+# Recomendacao: NUM_CLIENTS // 2 (metade dos clientes sempre participa).
+# Com 6 clientes e HEALTH_SCORE_MAX_EXCLUDE=2, piso=3 garante minimo de 1
+# cliente treinando mesmo no pior caso; piso=4 garante minimo de 2.
+SDN_MIN_ELIGIBLE_CLIENTS = 4

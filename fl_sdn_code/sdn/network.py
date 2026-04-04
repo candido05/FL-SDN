@@ -21,6 +21,7 @@ from config import (
     SDN_MAX_PACKET_LOSS,
     SDN_SCORE_WEIGHTS,
     SDN_CLIENT_IPS,
+    SDN_MIN_ELIGIBLE_CLIENTS,
 )
 from sdn import controller
 
@@ -128,7 +129,7 @@ def calculate_efficiency_score(metrics: Dict[str, float]) -> float:
     Score mais alto = melhor condição de rede.
 
     Normalização:
-      bandwidth: relativo a SDN_MIN_BANDWIDTH_MBPS × 2 (30 Mbps para links de 20 Mbps)
+      bandwidth: relativo a 20 Mbps (capacidade máxima física dos enlaces, via tc tbf)
       latency:   máximo tolerável = SDN_MAX_LATENCY_MS (50 ms)
       loss:      máximo tolerável = SDN_MAX_PACKET_LOSS (10%)
     """
@@ -137,9 +138,9 @@ def calculate_efficiency_score(metrics: Dict[str, float]) -> float:
     lat = metrics.get("latency_ms", 100)
     loss = metrics.get("packet_loss", 1)
 
-    # Normaliza em relação aos limiares configurados, não ao valor absoluto 100 Mbps
-    # Isso mantém coerência com MAX_LINK_CAPACITY=20 Mbps do experimento atual
-    bw_cap   = float(SDN_MIN_BANDWIDTH_MBPS * 2)   # boa rede = 2× o mínimo
+    # Normaliza em relação à capacidade máxima física dos enlaces (20 Mbps, tc tbf).
+    # Os geradores injetam até 90 Mbps mas o teto físico limita a 20 Mbps.
+    bw_cap   = 20.0   # capacidade máxima dos enlaces (Mbps)
     bw_norm  = min(bw / bw_cap, 1.0)
     lat_norm = max(1.0 - (lat / SDN_MAX_LATENCY_MS), 0.0)
     loss_norm = max(1.0 - (loss / SDN_MAX_PACKET_LOSS), 0.0)
@@ -156,33 +157,57 @@ def filter_eligible_clients(
     all_metrics: Dict[int, Dict[str, float]],
 ) -> Dict[int, float]:
     """
-    Filtra clientes elegíveis pelos limiares de rede configurados.
+    Filtra clientes elegiveis pelos limiares de rede configurados.
     Retorna {client_id: efficiency_score} apenas para clientes aprovados.
+
+    Garante minimo de SDN_MIN_ELIGIBLE_CLIENTS clientes no resultado: se o
+    filtro rejeitar clientes demais, os melhores rejeitados (maior bandwidth)
+    sao readmitidos ate atingir o piso, evitando rounds com 1 unico cliente.
     """
     eligible = {}
+    rejected = {}  # {cid: metrics} dos clientes que nao passaram no filtro
+
     for cid, m in all_metrics.items():
         bw   = m.get("bandwidth_mbps", 0)
         lat  = m.get("latency_ms", 999)
         loss = m.get("packet_loss", 1)
 
         if bw < SDN_MIN_BANDWIDTH_MBPS:
-            print(f"  [SDN] Cliente {cid} inelegível: "
+            print(f"  [SDN] Cliente {cid} inelegivel: "
                   f"bandwidth {bw:.1f} Mbps < {SDN_MIN_BANDWIDTH_MBPS} Mbps")
+            rejected[cid] = m
             continue
         if lat > SDN_MAX_LATENCY_MS:
-            print(f"  [SDN] Cliente {cid} inelegível: "
-                  f"latência {lat:.1f} ms > {SDN_MAX_LATENCY_MS} ms")
+            print(f"  [SDN] Cliente {cid} inelegivel: "
+                  f"latencia {lat:.1f} ms > {SDN_MAX_LATENCY_MS} ms")
+            rejected[cid] = m
             continue
         if loss > SDN_MAX_PACKET_LOSS:
-            print(f"  [SDN] Cliente {cid} inelegível: "
+            print(f"  [SDN] Cliente {cid} inelegivel: "
                   f"perda {loss:.2%} > {SDN_MAX_PACKET_LOSS:.2%}")
+            rejected[cid] = m
             continue
 
         score = calculate_efficiency_score(m)
         eligible[cid] = score
         print(f"  [SDN] Cliente {cid}: "
               f"bw={bw:.1f}Mbps lat={lat:.1f}ms loss={loss:.2%} "
-              f"→ score={score:.4f} ✓")
+              f"-> score={score:.4f} ok")
+
+    # Piso: se poucos clientes passaram, readmite os melhores rejeitados
+    n_faltando = SDN_MIN_ELIGIBLE_CLIENTS - len(eligible)
+    if n_faltando > 0 and rejected:
+        por_bw = sorted(
+            rejected.items(),
+            key=lambda x: x[1].get("bandwidth_mbps", 0),
+            reverse=True,
+        )
+        for cid, m in por_bw[:n_faltando]:
+            bw = m.get("bandwidth_mbps", 0)
+            score = calculate_efficiency_score(m)
+            eligible[cid] = score
+            print(f"  [SDN] Cliente {cid} readmitido (piso={SDN_MIN_ELIGIBLE_CLIENTS}): "
+                  f"bw={bw:.1f}Mbps -> score={score:.4f}")
 
     return eligible
 
