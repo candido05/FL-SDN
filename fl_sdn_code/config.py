@@ -235,3 +235,29 @@ HEALTH_SCORE_ENABLED = True
 # Com 6 clientes e HEALTH_SCORE_MAX_EXCLUDE=2, piso=3 garante minimo de 1
 # cliente treinando mesmo no pior caso; piso=4 garante minimo de 2.
 SDN_MIN_ELIGIBLE_CLIENTS = 4
+
+# ---------------------------------------------------------------------------
+# Injecao de ruido — cenario de dados ruidosos
+# ---------------------------------------------------------------------------
+# Simula clientes com dados de baixa qualidade para avaliar a robustez do
+# mecanismo de selecao adaptativa (Health Score).
+#
+# NOISE_LABEL_FLIP_RATE = 0.40: inverte 40% dos labels de treino.
+#   Com 50% seria ruido puro aleatorio; 40% ainda carrega sinal invertido —
+#   o modelo aprende associacoes majoritariamente erradas, o que degrada
+#   fortemente a contribuicao do cliente ao modelo coletivo.
+#
+# NOISE_FEATURE_STD = 0.50: ruido gaussiano N(0, 0.5) nas features.
+#   Para features normalizadas em [0,1] (ex: MNIST pixels/255), desvio 0.5
+#   e da mesma ordem de grandeza do sinal — destrói a estrutura dos dados.
+#   Combinado com o label flip, torna a contribuicao do cliente prejudicial.
+#
+# Para desativar o ruido sem apagar os parametros: NOISE_ENABLED = False
+# Para aplicar a todos os datasets: NOISE_DATASET = None
+# Para mudar o dataset-alvo: NOISE_DATASET = "higgs" / "epsilon" / etc.
+
+NOISE_ENABLED         = True
+NOISE_DATASET         = "mnist"   # None = aplica em todos os datasets
+NOISE_CLIENTS         = [2, 4]    # client_ids que recebem dados ruidosos
+NOISE_LABEL_FLIP_RATE = 0.40      # 40% dos labels de treino sao invertidos
+NOISE_FEATURE_STD     = 0.50      # std do ruido gaussiano nas features

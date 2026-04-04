@@ -21,6 +21,7 @@ from sklearn.model_selection import train_test_split
 from config import TEST_SIZE, RANDOM_SEED, NUM_CLIENTS
 from datasets.registry import DatasetRegistry, stratified_partition
 from datasets.paths import npy_paths, is_prepared
+from datasets.noise import apply_noise
 
 
 @DatasetRegistry.register("higgs_full")
@@ -75,4 +76,5 @@ def load(role: str, client_id: int = 0, **kwargs):
           f"({(y_client == 0).mean()*100:.1f}%) | "
           f"Classe 1: {(y_client == 1).sum():,} "
           f"({(y_client == 1).mean()*100:.1f}%)")
+    X_client, y_client = apply_noise(X_client, y_client, client_id, "higgs_full")
     return X_client, y_client, X_test, y_test

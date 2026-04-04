@@ -53,31 +53,57 @@ class TestFilterEligibleClients:
         assert set(eligible.keys()) == {0, 1}
 
     def test_low_bandwidth_excluded(self):
+        # 5 clientes aprovados (> piso=4): cliente 5 com baixa banda deve ser excluido
         metrics = {
             0: {"bandwidth_mbps": 80, "latency_ms": 5, "packet_loss": 0.01},
-            1: {"bandwidth_mbps": 5, "latency_ms": 10, "packet_loss": 0.02},  # < 15 Mbps
+            1: {"bandwidth_mbps": 70, "latency_ms": 5, "packet_loss": 0.01},
+            2: {"bandwidth_mbps": 60, "latency_ms": 5, "packet_loss": 0.01},
+            3: {"bandwidth_mbps": 50, "latency_ms": 5, "packet_loss": 0.01},
+            4: {"bandwidth_mbps": 40, "latency_ms": 5, "packet_loss": 0.01},
+            5: {"bandwidth_mbps": 5,  "latency_ms": 5, "packet_loss": 0.01},  # < 15 Mbps
         }
         eligible = filter_eligible_clients(metrics)
-        assert 0 in eligible
-        assert 1 not in eligible
+        assert 5 not in eligible
+        assert len(eligible) == 5
 
     def test_high_latency_excluded(self):
+        # 5 clientes aprovados (> piso=4): cliente 5 com alta latencia deve ser excluido
         metrics = {
-            0: {"bandwidth_mbps": 80, "latency_ms": 5, "packet_loss": 0.01},
-            1: {"bandwidth_mbps": 60, "latency_ms": 80, "packet_loss": 0.02},  # > 50ms
+            0: {"bandwidth_mbps": 80, "latency_ms": 5,  "packet_loss": 0.01},
+            1: {"bandwidth_mbps": 70, "latency_ms": 5,  "packet_loss": 0.01},
+            2: {"bandwidth_mbps": 60, "latency_ms": 5,  "packet_loss": 0.01},
+            3: {"bandwidth_mbps": 50, "latency_ms": 5,  "packet_loss": 0.01},
+            4: {"bandwidth_mbps": 40, "latency_ms": 5,  "packet_loss": 0.01},
+            5: {"bandwidth_mbps": 60, "latency_ms": 80, "packet_loss": 0.01},  # > 50ms
         }
         eligible = filter_eligible_clients(metrics)
-        assert 0 in eligible
-        assert 1 not in eligible
+        assert 5 not in eligible
+        assert len(eligible) == 5
 
     def test_high_loss_excluded(self):
+        # 5 clientes aprovados (> piso=4): cliente 5 com alta perda deve ser excluido
         metrics = {
             0: {"bandwidth_mbps": 80, "latency_ms": 5, "packet_loss": 0.01},
-            1: {"bandwidth_mbps": 60, "latency_ms": 10, "packet_loss": 0.15},  # > 10%
+            1: {"bandwidth_mbps": 70, "latency_ms": 5, "packet_loss": 0.01},
+            2: {"bandwidth_mbps": 60, "latency_ms": 5, "packet_loss": 0.01},
+            3: {"bandwidth_mbps": 50, "latency_ms": 5, "packet_loss": 0.01},
+            4: {"bandwidth_mbps": 40, "latency_ms": 5, "packet_loss": 0.01},
+            5: {"bandwidth_mbps": 60, "latency_ms": 5, "packet_loss": 0.15},  # > 10%
         }
         eligible = filter_eligible_clients(metrics)
+        assert 5 not in eligible
+        assert len(eligible) == 5
+
+    def test_floor_readmits_when_too_few_pass(self):
+        # Com apenas 2 clientes, o piso readmite o rejeitado para garantir minimo
+        metrics = {
+            0: {"bandwidth_mbps": 80, "latency_ms": 5, "packet_loss": 0.01},
+            1: {"bandwidth_mbps": 5,  "latency_ms": 5, "packet_loss": 0.01},  # falha rede
+        }
+        eligible = filter_eligible_clients(metrics)
+        # Ambos presentes: o piso garante que o rejeitado e readmitido
         assert 0 in eligible
-        assert 1 not in eligible
+        assert 1 in eligible
 
     def test_eligible_returns_scores(self):
         metrics = {

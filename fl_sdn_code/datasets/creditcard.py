@@ -24,6 +24,7 @@ from sklearn.model_selection import train_test_split
 from config import TEST_SIZE, RANDOM_SEED, NUM_CLIENTS
 from datasets.registry import DatasetRegistry, stratified_partition
 from datasets.paths import npy_paths, is_prepared
+from datasets.noise import apply_noise
 
 
 @DatasetRegistry.register("creditcard")
@@ -73,4 +74,5 @@ def load(role: str, client_id: int = 0, **kwargs):
           f"({(y_client == 0).mean()*100:.2f}%) | "
           f"Fraudes: {n_fraud:,} "
           f"({n_fraud/n_total*100:.3f}%)")
+    X_client, y_client = apply_noise(X_client, y_client, client_id, "creditcard")
     return X_client, y_client, X_test, y_test
