@@ -1,1 +1,1 @@
-"""Integracao com SDN (OpenDaylight): metricas de rede, QoS, scoring."""
+"""Integração com SDN (OpenDaylight): métricas de rede, classificação DSCP e scoring."""

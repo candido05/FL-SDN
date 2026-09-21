@@ -7,7 +7,7 @@ Uso:
 
 Todos os clientes treinam com o mesmo numero de epocas locais (LOCAL_EPOCHS).
 As categorias (cat1/cat2/cat3) sao usadas apenas para priorizacao
-de trafego QoS nas estrategias SDN.
+de classificação DSCP nas estratégias SDN.
 """
 
 import argparse

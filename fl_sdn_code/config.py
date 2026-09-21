@@ -28,7 +28,7 @@ SDN_CLIENT_IPS = {
     5: "172.16.1.17",   # FL-Node-6
 }
 
-# Categorias de clientes (usadas para QoS/priorizacao de trafego SDN)
+# Categorias de clientes (usadas para classificação DSCP de tráfego SDN)
 # Todos os clientes sao do mesmo nivel — sem diferenciacao de categoria
 CLIENT_CATEGORIES = {
     0: "cat1",  # FL-Node-1
@@ -176,8 +176,9 @@ SDN_ADAPTIVE_EPOCHS = False
 SDN_MAX_LINK_CAPACITY_MBPS = 20.0  # limite fisico: tc tbf, largura real 10-17 Mbps sob congestionamento
 
 # Limiares de elegibilidade de clientes
-# Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps = 15 Mbps)
-SDN_MIN_BANDWIDTH_MBPS = 15.0  # Alinhado com REROUTE_THRESH do orquestrador (0.75 × 20 Mbps)
+# A seleção FL exige 15 Mbps DISPONÍVEIS; não é o limiar de reroute, que mede uso.
+SDN_MIN_BANDWIDTH_MBPS = 15.0  # 15 Mbps DISPONÍVEIS para seleção FL; política independente do reroute SDN
+SDN_DSCP_TIMEOUT_SECONDS = 15  # Timeout exclusivo das chamadas idempotentes de classificação DSCP
 SDN_MAX_LATENCY_MS     = 50.0   # Latencia maxima aceita
 SDN_MAX_PACKET_LOSS    = 0.10   # Perda de pacotes maxima (10%)
 

@@ -63,7 +63,7 @@ def get(endpoint: str, timeout: int = 5) -> Optional[dict]:
         return None
 
 
-def post(endpoint: str, body: dict, timeout: int = 5) -> Optional[dict]:
+def post(endpoint: str, body: dict, timeout: int = 5, operation: str | None = None) -> Optional[dict]:
     """
     POST request ao SDN Orchestrator.
     Retorna o JSON da resposta ou None em caso de falha.
@@ -77,7 +77,30 @@ def post(endpoint: str, body: dict, timeout: int = 5) -> Optional[dict]:
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception:
+    except requests.exceptions.Timeout:
+        if operation:
+            print(f"  [SDN] {operation}: timeout após {timeout}s")
+        return None
+    except requests.exceptions.ConnectionError as exc:
+        if operation:
+            print(f"  [SDN] {operation}: erro de transporte: {exc}")
+        return None
+    except requests.exceptions.HTTPError as exc:
+        if operation:
+            status = exc.response.status_code if exc.response is not None else "desconhecido"
+            print(f"  [SDN] {operation}: erro HTTP {status}")
+        return None
+    except requests.exceptions.RequestException as exc:
+        if operation:
+            print(f"  [SDN] {operation}: erro de requisição: {exc}")
+        return None
+    except ValueError as exc:
+        if operation:
+            print(f"  [SDN] {operation}: resposta JSON inválida: {exc}")
+        return None
+    except Exception as exc:
+        if operation:
+            print(f"  [SDN] {operation}: erro inesperado: {exc}")
         return None
 
 
@@ -123,7 +146,7 @@ def fl_round_stop() -> Optional[dict]:
     return result
 
 
-def delete(endpoint: str, timeout: int = 5) -> bool:
+def delete(endpoint: str, timeout: int = 5, operation: str | None = None) -> bool:
     """
     DELETE request ao SDN Orchestrator.
     Retorna True se a requisição foi bem-sucedida.
@@ -134,6 +157,24 @@ def delete(endpoint: str, timeout: int = 5) -> bool:
             headers={"Accept": "application/json"},
             timeout=timeout,
         )
-        return resp.status_code in (200, 204)
-    except Exception:
+        if resp.status_code in (200, 204):
+            return True
+        if operation:
+            print(f"  [SDN] {operation}: erro HTTP {resp.status_code}")
+        return False
+    except requests.exceptions.Timeout:
+        if operation:
+            print(f"  [SDN] {operation}: timeout após {timeout}s")
+        return False
+    except requests.exceptions.ConnectionError as exc:
+        if operation:
+            print(f"  [SDN] {operation}: erro de transporte: {exc}")
+        return False
+    except requests.exceptions.RequestException as exc:
+        if operation:
+            print(f"  [SDN] {operation}: erro de requisição: {exc}")
+        return False
+    except Exception as exc:
+        if operation:
+            print(f"  [SDN] {operation}: erro inesperado: {exc}")
         return False
