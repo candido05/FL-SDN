@@ -471,16 +471,9 @@ run_experiment() {
     local exp_start_time
     exp_start_time=$(date +%s)
 
-    # Configura SDN conforme o tipo de experimento
-    if [ "$exp_type" = "sem_sdn" ]; then
-        log "Modo sem_sdn: removendo flows SDN..."
-        cd "$SDN_DIR" && source venv/bin/activate 2>/dev/null
-        # sdn_tools.py esta em orchestrator/utils/ -- nao na raiz do projeto
-        python3 orchestrator/utils/sdn_tools.py clean \
-            >> "$LOG_DIR/sdn_clean_${exp_name}.log" 2>&1 || true
-        deactivate 2>/dev/null || true
-        ok "Flows SDN removidos"
-    else
+    # Apenas o braço com_sdn depende do orquestrador; `clean` nunca removeu
+    # flows SDN e não é uma transição válida para o experimento de controle.
+    if [ "$exp_type" = "com_sdn" ]; then
         if ! check_orchestrator; then
             err "Orquestrador SDN nao esta respondendo! Abortando $exp_name."
             return 1
