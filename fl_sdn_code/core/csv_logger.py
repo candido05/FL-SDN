@@ -15,7 +15,7 @@ import csv
 import os
 import sys
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from core.metrics import CSV_METRIC_FIELDS
 
@@ -142,9 +142,19 @@ class SDNMetricsLogger:
         scores: Dict[int, float],
         adapted_epochs: Dict[int, int],
         default_epochs: int,
+        status: Optional[Dict[int, str]] = None,
     ) -> None:
-        """Registra metricas de rede por cliente por round."""
-        for cid in selected_clients:
+        """
+        Registra metricas de rede por cliente por round.
+
+        Sem `status`, registra so os selecionados. Com `status`
+        ({client_id: "selecionado" | "inelegivel_rede" | "excluido_health"}),
+        registra todos os clientes do round com o motivo — e o que permite
+        conferir depois, pelo CSV, que a selecao seguiu a rede.
+        """
+        clients = sorted(status) if status else selected_clients
+        selected = set(selected_clients)
+        for cid in clients:
             m = all_metrics.get(cid, {})
             row = {
                 "round": server_round,
@@ -155,7 +165,8 @@ class SDNMetricsLogger:
                 "jitter_ms": round(m.get("jitter_ms", 0), 2),
                 "efficiency_score": round(scores.get(cid, 0), 4),
                 "adapted_epochs": adapted_epochs.get(cid, default_epochs),
-                "selected": True,
+                "selected": cid in selected,
+                "status": status.get(cid, "") if status else "selecionado",
             }
             self._rows.append(row)
 

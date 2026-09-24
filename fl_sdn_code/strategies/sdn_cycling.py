@@ -24,7 +24,7 @@ from core.health_score import ClientHealthTracker
 from sdn.network import get_network_metrics, filter_eligible_clients, adapt_local_epochs
 from sdn.qos import apply_qos_policy, remove_qos_policies
 from sdn.controller import fl_round_start, fl_round_stop
-from strategies.base import BaseStrategy
+from strategies.base import BaseStrategy, map_clients_by_id
 
 
 class SDNCycling(BaseStrategy):
@@ -94,9 +94,11 @@ class SDNCycling(BaseStrategy):
             num_clients=self.num_clients,
             min_num_clients=self.num_clients,
         )
-        clients = sorted(clients, key=lambda c: c.cid)
 
-        client_map = {i: (i, c) for i, c in enumerate(clients)}
+        # client_id real de cada conexao (ver map_clients_by_id); a posicao
+        # no ciclo e a ordem crescente de client_id
+        by_id = map_clients_by_id(clients)
+        client_map = {cid: (i, by_id[cid]) for i, cid in enumerate(sorted(by_id))}
 
         # Reset do ciclo
         if len(self.trained_this_cycle) >= self.num_clients:
@@ -171,7 +173,7 @@ class SDNCycling(BaseStrategy):
         sys.stdout.flush()
 
         # Prepara FitIns
-        idx, proxy = client_map.get(selected_cid, (0, clients[0]))
+        idx, proxy = client_map[selected_cid]
         config = {
             "server_round": server_round,
             "cycling_position": idx,

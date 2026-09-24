@@ -19,12 +19,48 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from flwr.common import Parameters, Scalar
+from flwr.common import Code, GetPropertiesIns, Parameters, Scalar
 from flwr.server.strategy import Strategy
 from flwr.server.client_manager import ClientManager
+from flwr.server.client_proxy import ClientProxy
 
 from core.metrics import compute_all_metrics, print_metrics_table
 from core.csv_logger import ConvergenceLogger
+
+# Prazo para cada cliente responder get_properties (so devolve o client_id).
+CLIENT_ID_TIMEOUT_S = 30
+
+
+def map_clients_by_id(clients: List[ClientProxy]) -> Dict[int, ClientProxy]:
+    """
+    Devolve {client_id real: proxy}, perguntando o id a cada conexao.
+
+    A posicao em client_manager.sample() nao serve de id: o Flower sorteia a
+    ordem a cada round e identifica conexoes por UUID. As estrategias SDN
+    cruzam o id com SDN_CLIENT_IPS para buscar as metricas de rede, aplicar
+    DSCP e excluir por Health Score — com o id errado, tudo isso atinge
+    outro cliente. Por isso um id ausente ou repetido interrompe o round em
+    vez de cair num palpite.
+    """
+    by_id: Dict[int, ClientProxy] = {}
+    for proxy in clients:
+        res = proxy.get_properties(
+            GetPropertiesIns(config={}), timeout=CLIENT_ID_TIMEOUT_S, group_id=None,
+        )
+        cid = res.properties.get("client_id") if res.status.code == Code.OK else None
+        if not isinstance(cid, int) or isinstance(cid, bool):
+            raise RuntimeError(
+                f"conexao {proxy.cid} nao informou client_id "
+                f"(status={res.status.code}, {res.status.message!r}) — "
+                "o cliente precisa ser a versao de client.py com get_properties"
+            )
+        if cid in by_id:
+            raise RuntimeError(
+                f"duas conexoes se apresentaram como client_id {cid} "
+                f"({by_id[cid].cid} e {proxy.cid})"
+            )
+        by_id[cid] = proxy
+    return by_id
 
 
 class BaseStrategy(Strategy):

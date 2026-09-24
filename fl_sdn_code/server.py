@@ -14,6 +14,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 import warnings
 
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -31,7 +32,7 @@ logging.getLogger("grpc").setLevel(logging.ERROR)
 
 from config import SERVER_ADDRESS, NUM_CLIENTS, NUM_ROUNDS, LOCAL_EPOCHS
 from core.csv_logger import CSVLogger
-from core.output import create_run_dir
+from core.output import create_run_dir, tee_output, write_run_info
 from datasets import DatasetRegistry
 from strategies import create_strategy
 
@@ -49,7 +50,26 @@ def main():
 
     exp_name = os.environ.get("EXP", "experimento")
     run_dir = create_run_dir(args.model, args.strategy, exp_name)
+    tee_output(run_dir)
     logger = CSVLogger(run_dir, exp_name)
+
+    # Contrato com os scripts do laboratorio (core/output.py, write_run_info)
+    run_info = {
+        "pid": os.getpid(),
+        "inicio": time.time(),
+        "inicio_iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "exp": exp_name,
+        "modelo": args.model,
+        "estrategia": args.strategy,
+        "dataset": args.dataset,
+        "num_rounds": NUM_ROUNDS,
+        "local_epochs": LOCAL_EPOCHS,
+        "num_clientes": NUM_CLIENTS,
+        "endereco": SERVER_ADDRESS,
+        "run_dir": run_dir,
+        "estado": "carregando_dataset",
+    }
+    write_run_info(run_dir, run_info)
 
     print(f"\n{'='*60}")
     print(f"  SERVIDOR FL - {args.model.upper()} + {args.strategy.upper()}")
@@ -81,14 +101,24 @@ def main():
     sys.stdout.flush()
 
     logger.start_timer()
+    run_info["estado"] = "em_execucao"
+    write_run_info(run_dir, run_info)
 
-    fl.server.start_server(
-        server_address=SERVER_ADDRESS,
-        config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
-        strategy=strategy,
-    )
+    try:
+        fl.server.start_server(
+            server_address=SERVER_ADDRESS,
+            config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
+            strategy=strategy,
+        )
+    except BaseException as exc:
+        run_info.update(estado="falhou", fim=time.time(),
+                        erro=f"{type(exc).__name__}: {exc}")
+        write_run_info(run_dir, run_info)
+        raise
 
     total = logger.total_elapsed()
+    run_info.update(estado="concluido", fim=time.time(), duracao_s=total)
+    write_run_info(run_dir, run_info)
     print(f"\n{'='*60}")
     print(f"  SERVIDOR - TREINAMENTO CONCLUIDO")
     print(f"  Tempo total: {total}s  |  Rounds: {NUM_ROUNDS}  |  Log: {logger.log_file}")

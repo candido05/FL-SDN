@@ -31,7 +31,7 @@ import numpy as np
 import flwr as fl
 from flwr.common import (
     Code, Status, FitIns, FitRes, EvaluateIns, EvaluateRes,
-    Parameters,
+    GetPropertiesIns, GetPropertiesRes, Parameters,
 )
 
 logging.getLogger("flwr").setLevel(logging.ERROR)
@@ -86,6 +86,17 @@ class SimpleClient(fl.client.Client):
         exp_name = os.environ.get("EXP", "experimento")
         self._client_round_logger = ClientRoundLogger(run_dir, exp_name)
         self._epoch_logger = EpochLogger(run_dir, exp_name)
+
+    def get_properties(self, ins: GetPropertiesIns) -> GetPropertiesRes:
+        """
+        Informa o client_id ao servidor. O Flower identifica cada conexao por
+        um UUID e sorteia a ordem em client_manager.sample(); sem isto o
+        servidor nao sabe qual conexao corresponde a qual IP de SDN_CLIENT_IPS.
+        """
+        return GetPropertiesRes(
+            status=Status(code=Code.OK, message="OK"),
+            properties={"client_id": self.client_id},
+        )
 
     def fit(self, ins: FitIns) -> FitRes:
         config = ins.config

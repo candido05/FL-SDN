@@ -24,7 +24,7 @@ from core.health_score import ClientHealthTracker, compute_leave_one_out
 from sdn.network import get_network_metrics, filter_eligible_clients, adapt_local_epochs
 from sdn.qos import apply_qos_policy, remove_qos_policies
 from sdn.controller import fl_round_start, fl_round_stop
-from strategies.base import BaseStrategy
+from strategies.base import BaseStrategy, map_clients_by_id
 
 
 class SDNBagging(BaseStrategy):
@@ -108,9 +108,9 @@ class SDNBagging(BaseStrategy):
             min_num_clients=self.num_clients,
         )
 
-        # Mapeia indice sequencial para evitar colisoes de hash
-        client_map = {i: c for i, c in enumerate(clients)}
-        all_client_ids = list(client_map.keys())
+        # client_id real de cada conexao (ver map_clients_by_id)
+        client_map = map_clients_by_id(clients)
+        all_client_ids = sorted(client_map)
 
         print(f"# Consultando metricas de rede via SDN...")
         sys.stdout.flush()
@@ -121,6 +121,8 @@ class SDNBagging(BaseStrategy):
 
         # 2. Filtra e calcula scores
         eligible = filter_eligible_clients(net_metrics)
+        status = {cid: ("elegivel" if cid in eligible else "inelegivel_rede")
+                  for cid in all_client_ids}
         if not eligible:
             print(f"  [SDN] AVISO: Nenhum cliente elegivel! Usando todos.")
             eligible = {cid: 0.5 for cid in all_client_ids}
@@ -146,6 +148,10 @@ class SDNBagging(BaseStrategy):
         # 5. Seleciona os melhores dentre os elegiveis restantes
         sorted_clients = sorted(eligible.items(), key=lambda x: x[1], reverse=True)
         selected_ids = [cid for cid, _ in sorted_clients]
+        for cid in excluded_ids:
+            status[cid] = "excluido_health"
+        for cid in selected_ids:
+            status[cid] = "selecionado"
 
         print(f"\n  [SDN] Clientes selecionados: {selected_ids}")
         if excluded_ids:
@@ -164,8 +170,7 @@ class SDNBagging(BaseStrategy):
 
         # 5. Adapta epocas locais
         # NOTA: quando SDN_ADAPTIVE_EPOCHS=False, enviamos adapted_epochs=0
-        # para que o CLIENTE use suas proprias epocas por categoria.
-        # Isso evita o bug de mapeamento posicao→client_id do client_manager.sample().
+        # para que o CLIENTE use suas proprias epocas (LOCAL_EPOCHS).
         adapted_epochs = {}
         for cid in selected_ids:
             cat = CLIENT_CATEGORIES.get(cid, "cat1")
@@ -192,6 +197,7 @@ class SDNBagging(BaseStrategy):
             self._sdn_logger.log_round(
                 server_round, selected_ids, net_metrics,
                 eligible, adapted_epochs, LOCAL_EPOCHS,
+                status=status,
             )
         sys.stdout.flush()
 

@@ -1,7 +1,20 @@
 """
 Configuracoes centralizadas do FL-SDN.
 Modifique os valores abaixo conforme necessario.
+
+NUM_ROUNDS e LOCAL_EPOCHS aceitam override por ambiente (FL_NUM_ROUNDS,
+FL_LOCAL_EPOCHS), para rodadas curtas de validacao sem editar este arquivo.
+O servidor grava os valores efetivos em execucao.json; o
+scripts/clientes_fl.sh do sdn_v1 le de la e repassa aos clientes.
 """
+
+import os as _os
+
+
+def _env_int(name: str, default: int) -> int:
+    value = _os.environ.get(name, "").strip()
+    return int(value) if value else default
+
 
 # ---------------------------------------------------------------------------
 # Rede — Topologia GNS3
@@ -56,8 +69,8 @@ SERVER_ADDRESS = f"{SERVER_HOST}:{SERVER_PORT}"
 # Treinamento Federado
 # ---------------------------------------------------------------------------
 #NUM_CLIENTS = 3                # Numero de clientes federados
-NUM_ROUNDS = 20                 # Rounds de comunicacao servidor-clientes
-LOCAL_EPOCHS = 50              # Numero de estimadores/iteracoes por treino local
+NUM_ROUNDS = _env_int("FL_NUM_ROUNDS", 20)      # Rounds de comunicacao servidor-clientes
+LOCAL_EPOCHS = _env_int("FL_LOCAL_EPOCHS", 50)  # Numero de estimadores/iteracoes por treino local
                                # (n_estimators para XGBoost/LightGBM, iterations para CatBoost)
 LOG_EVERY = 10                 # Mostrar progresso a cada N epocas locais
 
