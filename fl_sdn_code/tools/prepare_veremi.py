@@ -3,11 +3,14 @@
 Especificação: ESPEC_M0_FASE_OFFLINE.md (o que fazer).
 Guia:          GUIA_M0_FASE_OFFLINE.md  (por que fazer).
 
-ETAPA 1 (esta versão): passos 1, 2 e 3 da especificação.
+ETAPA 2 (esta versão): passos 1 a 6 da especificação.
     1. conferir o SHA-256 do CSV
     2. ler as 21 colunas necessárias, com dtypes fixos
     3. conferir a regra "cada veículo tem uma única classe"
-Os passos 4 a 10 serão acrescentados nas próximas etapas.
+    4. remover os veículos do ataque tipo 2
+    5. remover as linhas do pseudônimo 1 (só as linhas)
+    6. conferir a regra "cada pseudônimo pertence a um único veículo"
+Os passos 7 a 10 serão acrescentados nas próximas etapas.
 """
 from __future__ import annotations
 
@@ -44,6 +47,9 @@ DTYPES = {
     "messageID": np.int64,
     LABEL_COLUMN: np.int16,
 }
+
+EXCLUDED_ATTACK_TYPE = 2    # Constant Position Offset (passo 4)
+BROKEN_PSEUDONYM = 1        # defeito do gerador (passo 5)
 
 EXPECTED_ROWS = 3_194_808   # linhas do CSV real (seção 9)
 CHUNK_ROWS = 500_000        # linhas por pedaço na leitura
@@ -123,6 +129,58 @@ def check_one_class_per_sender(df: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Passo 4 — remover os veículos do ataque tipo 2
+# ---------------------------------------------------------------------------
+
+def remove_attack_type_2(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Remove TODAS as linhas dos veículos com class == 2.
+
+    Como o passo 3 garantiu 1 classe por veículo, filtrar pela classe
+    equivale a remover os veículos inteiros.
+    Devolve o DataFrame filtrado e as contagens para o manifesto.
+    """
+    mask = df[LABEL_COLUMN] == EXCLUDED_ATTACK_TYPE
+    stats = {
+        "rows_removed": int(mask.sum()),
+        "vehicles_removed": int(df.loc[mask, "sender"].nunique()),
+    }
+    return df[~mask].reset_index(drop=True), stats
+
+
+# ---------------------------------------------------------------------------
+# Passo 5 — remover as linhas do pseudônimo 1
+# ---------------------------------------------------------------------------
+
+def remove_pseudonym_1(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Remove SÓ as linhas com senderPseudo == 1.
+
+    Os veículos que usaram esse pseudônimo continuam no dataset com as
+    mensagens enviadas sob os outros pseudônimos.
+    """
+    mask = df["senderPseudo"] == BROKEN_PSEUDONYM
+    stats = {
+        "rows_removed": int(mask.sum()),
+        "vehicles_affected": int(df.loc[mask, "sender"].nunique()),
+    }
+    return df[~mask].reset_index(drop=True), stats
+
+
+# ---------------------------------------------------------------------------
+# Passo 6 — cada pseudônimo pertence a um único veículo
+# ---------------------------------------------------------------------------
+
+def check_one_sender_per_pseudonym(df: pd.DataFrame) -> None:
+    n_senders = df.groupby("senderPseudo")["sender"].nunique()
+    bad = n_senders[n_senders > 1]
+    if len(bad) > 0:
+        details = "; ".join(f"pseudônimo {p}: {n} veículos" for p, n in bad.head(10).items())
+        raise PreparationError(
+            f"Regra '1 veículo por pseudônimo' violada em {len(bad)} pseudônimo(s). "
+            f"Primeiros: {details}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -151,11 +209,31 @@ def main(argv: list[str] | None = None) -> None:
         check_one_class_per_sender(df)
         print(f"    ok: {df['sender'].nunique():,} veículos, nenhuma violação")
 
+        print("[4] Removendo os veículos do ataque tipo 2...")
+        df, stats_t2 = remove_attack_type_2(df)
+        print(f"    removidas {stats_t2['rows_removed']:,} linhas, "
+              f"{stats_t2['vehicles_removed']:,} veículos "
+              f"(esperado: 43,567 linhas, 390 veículos)")
+
+        print("[5] Removendo as linhas do pseudônimo 1...")
+        df, stats_p1 = remove_pseudonym_1(df)
+        print(f"    removidas {stats_p1['rows_removed']:,} linhas, "
+              f"de {stats_p1['vehicles_affected']:,} veículos "
+              f"(esperado: 40,853 linhas, 377 veículos)")
+
+        print("[6] Conferindo '1 veículo por pseudônimo'...")
+        check_one_sender_per_pseudonym(df)
+        print(f"    ok: {df['senderPseudo'].nunique():,} pseudônimos, nenhuma violação "
+              f"(esperado: 118,518)")
+
+        print(f"Restam {len(df):,} linhas (esperado: 3,110,388) "
+              f"e {df['sender'].nunique():,} veículos (esperado: 24,273)")
+
     except PreparationError as e:
         print(f"ERRO: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Etapa 1 concluída em {time.perf_counter() - t0:.1f} s")
+    print(f"Etapa 2 concluída em {time.perf_counter() - t0:.1f} s")
 
 
 if __name__ == "__main__":
