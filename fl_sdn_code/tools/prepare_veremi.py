@@ -3,7 +3,7 @@
 Especificação: ESPEC_M0_FASE_OFFLINE.md (o que fazer).
 Guia:          GUIA_M0_FASE_OFFLINE.md  (por que fazer).
 
-ETAPA 3 (esta versão): passos 1 a 8 da especificação.
+Versão final: passos 1 a 10 da especificação.
     1. conferir o SHA-256 do CSV
     2. ler as 21 colunas necessárias, com dtypes fixos
     3. conferir a regra "cada veículo tem uma única classe"
@@ -12,12 +12,23 @@ ETAPA 3 (esta versão): passos 1 a 8 da especificação.
     6. conferir a regra "cada pseudônimo pertence a um único veículo"
     7. criar os rótulos y, tipo e familia
     8. calcular as 4 features temporais (causais, por pseudônimo)
-Os passos 9 e 10 serão acrescentados na próxima etapa.
+    9. montar a matriz X (N, 20) em float32
+   10. gravar X/y/tipo/familia/sender (.npy) + manifest.json, de forma atômica
+
+Uso (de dentro de fl_sdn_code/):
+    python tools/prepare_veremi.py --input .../mixalldata_clean.csv \
+        --output data/veremi/prepared_v1 --expected-sha256 884e4567...
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
+import json
+import os
+import platform
+import shutil
+import subprocess
 import sys
 import time
 
@@ -69,6 +80,19 @@ FAMILY_NAMES = {fam: nome for fam, (nome, _) in FAMILIES.items()}
 # Passo 8: as 4 features temporais, nesta ordem (colunas 16-19 de X).
 TEMPORAL_FEATURES = ["dt_prev", "rate_5s", "pos_resid", "spd_resid"]
 RATE_WINDOW_S = 5.0
+
+# Passo 9: as 20 colunas de X, nesta ordem.
+FEATURE_NAMES = CONTENT_FEATURES + TEMPORAL_FEATURES
+
+# Passo 10: formato da saída. Mudou o formato -> nova versão + novo diretório.
+SCHEMA_VERSION = "1.0"
+OUTPUT_DTYPES = {
+    "X": np.float32,
+    "y": np.int8,
+    "tipo": np.int8,
+    "familia": np.int8,
+    "sender": np.int64,
+}
 
 EXPECTED_ROWS = 3_194_808   # linhas do CSV real (seção 9)
 CHUNK_ROWS = 500_000        # linhas por pedaço na leitura
@@ -261,7 +285,7 @@ def compute_temporal_features(df: pd.DataFrame, window_s: float = RATE_WINDOW_S)
     def prev(a):
         out = np.empty_like(a)
         out[0] = np.nan
-        out[1:] = a[:-1] # shift right
+        out[1:] = a[:-1]
         out[first] = np.nan
         return out
 
@@ -299,6 +323,218 @@ def compute_temporal_features(df: pd.DataFrame, window_s: float = RATE_WINDOW_S)
 
 
 # ---------------------------------------------------------------------------
+# Passo 9 — matriz de features
+# ---------------------------------------------------------------------------
+
+def build_feature_matrix(df: pd.DataFrame, temporal: pd.DataFrame) -> np.ndarray:
+    """Monta X (N, 20) float32: 16 de conteúdo + 4 temporais, na ordem de FEATURE_NAMES.
+
+    As linhas seguem a ordem do CSV (após os filtros), que é a ordem de df.
+    """
+    forbidden = set(CONTROL_COLUMNS) | {LABEL_COLUMN}
+    leaked = forbidden & set(FEATURE_NAMES)
+    if leaked:
+        raise PreparationError(f"Coluna de controle/rótulo entre as features: {sorted(leaked)}")
+    if len(FEATURE_NAMES) != 20:
+        raise PreparationError(f"Esperadas 20 features, há {len(FEATURE_NAMES)}")
+    if not temporal.index.equals(df.index):
+        raise PreparationError("Features temporais desalinhadas das linhas do DataFrame")
+
+    X = np.empty((len(df), len(FEATURE_NAMES)), dtype=np.float32)
+    for j, c in enumerate(CONTENT_FEATURES):
+        X[:, j] = df[c].to_numpy(dtype=np.float32)
+    for j, c in enumerate(TEMPORAL_FEATURES, start=len(CONTENT_FEATURES)):
+        X[:, j] = temporal[c].to_numpy(dtype=np.float32)
+    return X
+
+
+# ---------------------------------------------------------------------------
+# Passo 10 — gravação
+# ---------------------------------------------------------------------------
+
+def check_output_free(output: str) -> str:
+    """Confere que nem <output> nem <output>.tmp existem. Devolve o caminho do .tmp."""
+    tmp = output.rstrip("/") + ".tmp"
+    if os.path.exists(output):
+        raise PreparationError(
+            f"O diretório de saída já existe: {output}. Os dados preparados nunca são "
+            f"sobrescritos; para gerar outra versão, use outro --output."
+        )
+    if os.path.exists(tmp):
+        raise PreparationError(
+            f"Existe um diretório temporário de uma execução interrompida: {tmp}. "
+            f"Confira e apague-o antes de rodar de novo."
+        )
+    return tmp
+
+
+def git_info() -> dict:
+    """Commit atual e se há alterações não commitadas (None se não for um repositório git)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=here,
+                                capture_output=True, text=True, check=True).stdout.strip()
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=here,
+                                capture_output=True, text=True, check=True).stdout
+        return {"git_commit": commit, "git_dirty": bool(status.strip())}
+    except (OSError, subprocess.CalledProcessError):
+        return {"git_commit": None, "git_dirty": None}
+
+
+def write_output(output: str, arrays: dict[str, np.ndarray], manifest: dict) -> None:
+    """Grava tudo em <output>.tmp e só no fim renomeia para <output>."""
+    tmp = check_output_free(output)
+    parent = os.path.dirname(os.path.abspath(output))
+    os.makedirs(parent, exist_ok=True)
+    os.makedirs(tmp)
+    try:
+        files = {}
+        for name, arr in arrays.items():
+            expected = np.dtype(OUTPUT_DTYPES[name])
+            if arr.dtype != expected:
+                raise PreparationError(f"{name}: dtype {arr.dtype}, esperado {expected}")
+            fname = f"{name}.npy"
+            fpath = os.path.join(tmp, fname)
+            np.save(fpath, np.ascontiguousarray(arr), allow_pickle=False)
+            files[fname] = {
+                "sha256": sha256_file(fpath),
+                "shape": list(arr.shape),
+                "dtype": str(arr.dtype),
+            }
+        manifest["files"] = files
+        with open(os.path.join(tmp, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, sort_keys=True, ensure_ascii=False)
+            f.write("\n")
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)   # nunca deixa um .tmp pela metade
+        raise
+    os.rename(tmp, output)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline completo
+# ---------------------------------------------------------------------------
+
+def prepare(
+    input_path: str,
+    output: str,
+    expected_sha256: str,
+    expected_rows: int | None = EXPECTED_ROWS,
+    verbose: bool = True,
+) -> dict:
+    """Roda os passos 1 a 10. Devolve o manifesto gravado.
+
+    expected_rows=None desliga a conferência de tamanho (testes com CSVs pequenos).
+    """
+    log = print if verbose else (lambda *a, **k: None)
+    t0 = time.perf_counter()
+
+    # Falha cedo: não vale ler 1,2 GB para descobrir no fim que a saída já existe.
+    check_output_free(output)
+
+    log("[1] Conferindo SHA-256 do CSV...")
+    sha = check_sha256(input_path, expected_sha256)
+    log("    ok")
+
+    log("[2] Lendo o CSV...")
+    df = read_csv(input_path, expected_rows=expected_rows)
+    rows_read = len(df)
+    log(f"    ok: {rows_read:,} linhas, {df.shape[1]} colunas, "
+        f"{df.memory_usage(deep=True).sum() / 1e6:.0f} MB em memória")
+
+    log("[3] Conferindo '1 classe por veículo'...")
+    check_one_class_per_sender(df)
+    log(f"    ok: {df['sender'].nunique():,} veículos, nenhuma violação")
+
+    log("[4] Removendo os veículos do ataque tipo 2...")
+    df, stats_t2 = remove_attack_type_2(df)
+    log(f"    removidas {stats_t2['rows_removed']:,} linhas, {stats_t2['vehicles_removed']:,} "
+        f"veículos (esperado: 43,567 linhas, 390 veículos)")
+
+    log("[5] Removendo as linhas do pseudônimo 1...")
+    df, stats_p1 = remove_pseudonym_1(df)
+    log(f"    removidas {stats_p1['rows_removed']:,} linhas, de {stats_p1['vehicles_affected']:,} "
+        f"veículos (esperado: 40,853 linhas, 377 veículos)")
+
+    log("[6] Conferindo '1 veículo por pseudônimo'...")
+    check_one_sender_per_pseudonym(df)
+    n_pseudo = int(df["senderPseudo"].nunique())
+    log(f"    ok: {n_pseudo:,} pseudônimos, nenhuma violação (esperado: 118,518)")
+
+    log("[7] Criando os rótulos...")
+    labels = make_labels(df)
+    log(f"    fração benigna: {(labels['y'] == 0).mean():.3f} (esperado: 0.611)")
+
+    log("[8] Calculando as features temporais...")
+    temporal = compute_temporal_features(df)
+    n_ties = int((temporal["dt_prev"] == 0).sum())
+    log(f"    ok; empates de tempo no mesmo pseudônimo: {n_ties:,}")
+
+    log("[9] Montando X...")
+    X = build_feature_matrix(df, temporal)
+    log(f"    ok: {X.shape}, {X.nbytes / 1e6:.0f} MB")
+
+    # ---- números para o manifesto ----
+    familia = labels["familia"]
+    tipo = labels["tipo"]
+    counts = {
+        "rows": int(len(df)),
+        "vehicles": int(df["sender"].nunique()),
+        "pseudonyms": n_pseudo,
+        "benign_fraction": round(float((labels["y"] == 0).mean()), 4),
+        "rows_per_tipo": {str(k): int(v) for k, v in tipo.value_counts().sort_index().items()},
+        "rows_per_familia": {str(k): int(v) for k, v in familia.value_counts().sort_index().items()},
+        "vehicles_per_familia": {
+            str(k): int(v)
+            for k, v in df["sender"].groupby(familia).nunique().sort_index().items()
+        },
+    }
+    nan_fraction = {c: round(float(np.isnan(X[:, j]).mean()), 4)
+                    for j, c in enumerate(FEATURE_NAMES)}
+    if any(nan_fraction[c] > 0 for c in CONTENT_FEATURES):
+        bad = [c for c in CONTENT_FEATURES if nan_fraction[c] > 0]
+        raise PreparationError(f"NaN inesperado em features de conteúdo: {bad}")
+
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "created_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "code": git_info(),
+        "environment": {
+            "python": platform.python_version(),
+            "pandas": pd.__version__,
+            "numpy": np.__version__,
+        },
+        "input": {"path": os.path.abspath(input_path), "sha256": sha, "rows": rows_read},
+        "params": {"rate_window_s": RATE_WINDOW_S},
+        "exclusions": {"attack_type_2": stats_t2, "pseudonym_1": stats_p1},
+        "notes": {"same_time_messages_in_pseudonym": n_ties},
+        "feature_names": FEATURE_NAMES,
+        "family_map": {str(k): v for k, v in sorted(FAMILY_MAP.items())},
+        "family_names": {str(k): v for k, v in FAMILY_NAMES.items()},
+        "counts": counts,
+        "nan_fraction": nan_fraction,
+    }
+
+    arrays = {
+        "X": X,
+        "y": labels["y"].to_numpy(dtype=np.int8),
+        "tipo": labels["tipo"].to_numpy(dtype=np.int8),
+        "familia": labels["familia"].to_numpy(dtype=np.int8),
+        "sender": df["sender"].to_numpy(dtype=np.int64),
+    }
+    n = len(df)
+    for name, arr in arrays.items():
+        if arr.shape[0] != n:
+            raise PreparationError(f"{name} tem {arr.shape[0]} linhas, esperado {n}")
+
+    log(f"[10] Gravando em {output} ...")
+    manifest["runtime_seconds"] = round(time.perf_counter() - t0, 1)
+    write_output(output, arrays, manifest)
+    log("    ok")
+    return manifest
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -312,67 +548,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    t0 = time.perf_counter()
     try:
-        print("[1] Conferindo SHA-256 do CSV...")
-        check_sha256(args.input, args.expected_sha256)
-        print("    ok")
-
-        print("[2] Lendo o CSV...")
-        df = read_csv(args.input)
-        mem_mb = df.memory_usage(deep=True).sum() / 1e6
-        print(f"    ok: {len(df):,} linhas, {df.shape[1]} colunas, {mem_mb:.0f} MB em memória")
-
-        print("[3] Conferindo '1 classe por veículo'...")
-        check_one_class_per_sender(df)
-        print(f"    ok: {df['sender'].nunique():,} veículos, nenhuma violação")
-
-        print("[4] Removendo os veículos do ataque tipo 2...")
-        df, stats_t2 = remove_attack_type_2(df)
-        print(f"    removidas {stats_t2['rows_removed']:,} linhas, "
-              f"{stats_t2['vehicles_removed']:,} veículos "
-              f"(esperado: 43,567 linhas, 390 veículos)")
-
-        print("[5] Removendo as linhas do pseudônimo 1...")
-        df, stats_p1 = remove_pseudonym_1(df)
-        print(f"    removidas {stats_p1['rows_removed']:,} linhas, "
-              f"de {stats_p1['vehicles_affected']:,} veículos "
-              f"(esperado: 40,853 linhas, 377 veículos)")
-
-        print("[6] Conferindo '1 veículo por pseudônimo'...")
-        check_one_sender_per_pseudonym(df)
-        print(f"    ok: {df['senderPseudo'].nunique():,} pseudônimos, nenhuma violação "
-              f"(esperado: 118,518)")
-
-        print(f"Restam {len(df):,} linhas (esperado: 3,110,388) "
-              f"e {df['sender'].nunique():,} veículos (esperado: 24,273)")
-
-        print("[7] Criando os rótulos...")
-        labels = make_labels(df)
-        print(f"    fração benigna: {(labels['y'] == 0).mean():.3f} (esperado: 0.611)")
-        print("    família     linhas (esperado)        veículos (esperado)")
-        exp_rows = [1_900_539, 130_085, 171_125, 173_509, 387_299, 347_831]
-        exp_veh = [17_264, 1_169, 1_557, 1_558, 1_168, 1_557]
-        for fam, nome in FAMILY_NAMES.items():
-            m = labels["familia"] == fam
-            print(f"    {fam} {nome:8s} {int(m.sum()):>10,} ({exp_rows[fam]:>9,})"
-                  f"   {df.loc[m, 'sender'].nunique():>8,} ({exp_veh[fam]:>6,})")
-
-        print("[8] Calculando as features temporais...")
-        t8 = time.perf_counter()
-        temporal = compute_temporal_features(df)
-        print(f"    ok em {time.perf_counter() - t8:.1f} s")
-        for c in TEMPORAL_FEATURES:
-            print(f"    {c:10s} NaN: {temporal[c].isna().mean():.4f}")
-        print("    (esperado: 0.0381 em dt_prev, pos_resid, spd_resid; 0 em rate_5s)")
-        n_ties = int((temporal["dt_prev"] == 0).sum())
-        print(f"    mensagens com dt_prev == 0 (empate de tempo no mesmo pseudônimo): {n_ties:,}")
-
+        manifest = prepare(args.input, args.output, args.expected_sha256)
     except PreparationError as e:
         print(f"ERRO: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Etapa 3 concluída em {time.perf_counter() - t0:.1f} s")
+    c = manifest["counts"]
+    print()
+    print("Resumo (valor obtido / esperado pela seção 9 da especificação):")
+    print(f"  linhas       {c['rows']:>10,} / 3,110,388")
+    print(f"  veículos     {c['vehicles']:>10,} / 24,273")
+    print(f"  pseudônimos  {c['pseudonyms']:>10,} / 118,518")
+    print(f"  benignos     {c['benign_fraction']:>10.3f} / 0.611")
+    exp_rows = [1_900_539, 130_085, 171_125, 173_509, 387_299, 347_831]
+    exp_veh = [17_264, 1_169, 1_557, 1_558, 1_168, 1_557]
+    print("  família       linhas (esperado)         veículos (esperado)")
+    for fam, nome in FAMILY_NAMES.items():
+        r = c["rows_per_familia"].get(str(fam), 0)
+        v = c["vehicles_per_familia"].get(str(fam), 0)
+        print(f"  {fam} {nome:8s} {r:>10,} ({exp_rows[fam]:>9,})   {v:>8,} ({exp_veh[fam]:>6,})")
+    nf = manifest["nan_fraction"]
+    print(f"  NaN dt_prev/pos_resid/spd_resid: {nf['dt_prev']}/{nf['pos_resid']}/{nf['spd_resid']}"
+          f" (esperado 0.0381); rate_5s: {nf['rate_5s']} (esperado 0)")
+    print(f"Concluído em {manifest['runtime_seconds']} s. Saída: {args.output}")
 
 
 if __name__ == "__main__":
